@@ -25,7 +25,7 @@ System prompts, developer messages, reasoning blocks, tool calls, tool output, i
 
 CiteAnything is identified as its own product even when its current execution runtime is Claude Code. A connected conversation therefore keeps a stable ID such as `citeanything:42`; its underlying Claude Code, Codex CLI, or Grok Build session ID is only runtime metadata.
 
-In CiteAnything, use **Take CiteAnything Home → Generate API Key**, then provide that key to the SyncAnything process:
+In CiteAnything, use **Take CiteAnything Home → Connect SyncAnything**, then provide that dedicated key to the SyncAnything process:
 
 ```bash
 export SYNCANYTHING_CITEANYTHING_API_KEY="ca_your_context_read_key"
