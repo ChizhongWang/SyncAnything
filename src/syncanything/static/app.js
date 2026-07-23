@@ -62,6 +62,15 @@ async function loadConnections() {
   }
 }
 
+async function waitForSync(onProgress) {
+  for (;;) {
+    const state = await getJson("/api/sync");
+    if (!state.running) return state;
+    if (onProgress) onProgress();
+    await new Promise(resolve => setTimeout(resolve, 1200));
+  }
+}
+
 async function loadStatus() {
   const status = await getJson("/api/status");
   document.querySelector("#status").textContent = `${status.sessions} 个会话 · ${status.messages} 条消息 · 仅存于本机`;
@@ -141,6 +150,8 @@ document.querySelector("#reindex").addEventListener("click", async event => {
   event.currentTarget.textContent = "刷新中…";
   try {
     await getJson("/api/reindex", { method: "POST" });
+    const sync = await waitForSync();
+    if (sync.error) throw new Error(sync.error);
     await Promise.all([loadStatus(), loadResults()]);
   } finally {
     event.currentTarget.disabled = false;
@@ -184,8 +195,14 @@ document.querySelector("#connection-form").addEventListener("submit", async even
       body: JSON.stringify(payload),
     });
     document.querySelector("#connection-key").value = "";
-    message.textContent = "连接成功，会话已同步";
-    await Promise.all([loadConnections(), loadStatus(), loadResults()]);
+    message.textContent = "连接成功，正在后台同步；可以关闭此窗口";
+    await loadConnections();
+    const sync = await waitForSync(() => {
+      message.textContent = "已授权，正在后台同步会话…";
+    });
+    if (sync.error) throw new Error(sync.error);
+    message.textContent = "同步完成";
+    await Promise.all([loadStatus(), loadResults()]);
   } catch (error) {
     message.textContent = error.message;
   } finally {

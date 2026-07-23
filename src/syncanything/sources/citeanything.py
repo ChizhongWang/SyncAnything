@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
@@ -106,7 +107,7 @@ class CiteAnythingAdapter(SourceAdapter):
                 if not isinstance(conversations, list) or not conversations:
                     break
 
-                new_count = 0
+                pending: dict[Any, tuple[str, dict[str, Any]]] = {}
                 for summary in conversations:
                     if not isinstance(summary, dict) or summary.get("id") is None:
                         continue
@@ -114,21 +115,52 @@ class CiteAnythingAdapter(SourceAdapter):
                     if conversation_id in seen:
                         continue
                     seen.add(conversation_id)
-                    new_count += 1
-                    detail = self._request_json(
-                        connection.base_url, api_key, f"/api/conversations/{conversation_id}"
-                    )
-                    if not isinstance(detail, dict):
-                        continue
-                    snapshot = {
-                        **summary,
-                        **detail,
-                        "_syncanything_base_url": connection.base_url,
-                        "_syncanything_connection_id": connection.id,
-                        "_syncanything_connection_name": connection.name,
-                    }
-                    self._write_snapshot(connection.id, conversation_id, snapshot)
+                    pending[conversation_id] = (conversation_id, summary)
 
+                with ThreadPoolExecutor(max_workers=6) as executor:
+                    futures = {
+                        executor.submit(
+                            self._request_json,
+                            connection.base_url,
+                            api_key,
+                            f"/api/conversations/{conversation_id}",
+                        ): (conversation_id, summary)
+                        for conversation_id, summary in pending.values()
+                    }
+                    for future in as_completed(futures):
+                        conversation_id, summary = futures[future]
+                        try:
+                            detail = future.result()
+                        except (
+                            HTTPError,
+                            URLError,
+                            TimeoutError,
+                            OSError,
+                            ValueError,
+                            json.JSONDecodeError,
+                        ) as error:
+                            message = f"{type(error).__name__}: {error}"
+                            self.sync_error = message
+                            self.sync_errors.append(
+                                {
+                                    "connection_id": connection.id,
+                                    "conversation_id": conversation_id,
+                                    "error": message,
+                                }
+                            )
+                            continue
+                        if not isinstance(detail, dict):
+                            continue
+                        snapshot = {
+                            **summary,
+                            **detail,
+                            "_syncanything_base_url": connection.base_url,
+                            "_syncanything_connection_id": connection.id,
+                            "_syncanything_connection_name": connection.name,
+                        }
+                        self._write_snapshot(connection.id, conversation_id, snapshot)
+
+                new_count = len(pending)
                 if new_count == 0 or len(conversations) < 100:
                     break
                 offset += new_count
@@ -146,7 +178,7 @@ class CiteAnythingAdapter(SourceAdapter):
                 "User-Agent": "SyncAnything/0.1",
             },
         )
-        with urlopen(request, timeout=20) as response:
+        with urlopen(request, timeout=12) as response:
             return json.loads(response.read().decode("utf-8"))
 
     def _write_snapshot(

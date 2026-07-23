@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
@@ -16,6 +17,8 @@ from syncanything.sources.citeanything import CiteAnythingAdapter
 class SyncAnythingHandler(BaseHTTPRequestHandler):
     index: ConversationIndex
     service: SyncAnythingService
+    sync_lock = threading.Lock()
+    sync_state: dict[str, object] = {"running": False, "report": None, "error": None}
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -24,6 +27,9 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/connections":
             self._json({"citeanything": ConnectionStore().public_connections()})
+            return
+        if parsed.path == "/api/sync":
+            self._json(dict(self.sync_state))
             return
         if parsed.path == "/api/sessions":
             query = parse_qs(parsed.query)
@@ -64,8 +70,11 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
         if path != "/api/reindex":
             self.send_error(HTTPStatus.NOT_FOUND)
             return
-        report = self.index.index_all()
-        self._json(report)
+        started = self._begin_reindex()
+        self._json(
+            {"started": started, **dict(self.sync_state)},
+            HTTPStatus.ACCEPTED,
+        )
 
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
@@ -89,9 +98,12 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
             api_key = str(payload.get("api_key") or "").strip()
             CiteAnythingAdapter(connections=[]).validate(base_url, api_key)
             connection = ConnectionStore().add_citeanything(name, base_url, api_key, site)
-            report = self.index.index_all()
+            started = self._begin_reindex()
             self._json(
-                {"connection": connection.public_dict(True), "index": report},
+                {
+                    "connection": connection.public_dict(True),
+                    "sync_started": started,
+                },
                 HTTPStatus.CREATED,
             )
         except HTTPError as error:
@@ -103,6 +115,32 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
             self._json({"error": f"无法连接 CiteAnything：{error}"}, HTTPStatus.BAD_GATEWAY)
         except (ValueError, RuntimeError, json.JSONDecodeError) as error:
             self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+
+    def _begin_reindex(self) -> bool:
+        if not self.sync_lock.acquire(blocking=False):
+            return False
+        type(self).sync_state = {"running": True, "report": None, "error": None}
+
+        def run() -> None:
+            try:
+                with ConversationIndex(self.index.db_path) as background_index:
+                    report = background_index.index_all()
+                type(self).sync_state = {
+                    "running": False,
+                    "report": report,
+                    "error": None,
+                }
+            except Exception as error:
+                type(self).sync_state = {
+                    "running": False,
+                    "report": None,
+                    "error": f"{type(error).__name__}: {error}",
+                }
+            finally:
+                self.sync_lock.release()
+
+        threading.Thread(target=run, name="syncanything-index", daemon=True).start()
+        return True
 
     def _static(self, name: str, content_type: str) -> None:
         data = files("syncanything.static").joinpath(name).read_bytes()
