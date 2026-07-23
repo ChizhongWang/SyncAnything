@@ -1,4 +1,12 @@
-# SyncAnything
+<p align="center">
+  <img src="src/syncanything/static/logo.svg" width="96" alt="SyncAnything logo" />
+</p>
+
+<h1 align="center">SyncAnything</h1>
+
+<p align="center">
+  <strong>One context index for every AI product.</strong>
+</p>
 
 SyncAnything is a local, agent-native index for conversations across AI products. It lets a person find an earlier session, inspect it, and point another agent to the exact conversation without copying histories into a new proprietary store.
 
