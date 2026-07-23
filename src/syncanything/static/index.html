@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SyncAnything</title>
+    <link rel="icon" href="/logo.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="SyncAnything home">
+        <img src="/logo.svg" alt="" />
+        <span>SyncAnything</span>
+        <small>by VeriGlow</small>
+      </a>
+      <div class="status" id="status">正在读取本地索引…</div>
+      <button class="quiet-button" id="reindex">刷新索引</button>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">ONE INDEX · EVERY AGENT</p>
+        <h1>找到那次对话，<br /><span>指给任何智能体。</span></h1>
+        <p class="intro">统一检索 Claude Code、Codex、Kimi Code、Pi 和 CiteAnything 的宝贵上下文。</p>
+
+        <label class="search-box">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></svg>
+          <input id="search" type="search" autocomplete="off" placeholder="搜索决定、问题、项目或原话…" autofocus />
+          <kbd>⌘ K</kbd>
+        </label>
+
+        <nav class="filters" aria-label="Filter by source">
+          <button class="filter active" data-source="">全部</button>
+          <button class="filter" data-source="claude">Claude Code</button>
+          <button class="filter" data-source="codex">Codex</button>
+          <button class="filter" data-source="kimi">Kimi Code</button>
+          <button class="filter" data-source="pi">Pi</button>
+          <button class="filter" data-source="citeanything">CiteAnything</button>
+        </nav>
+      </section>
+
+      <section class="results-section">
+        <div class="section-heading">
+          <h2 id="result-title">最近的会话</h2>
+          <span id="result-count"></span>
+        </div>
+        <div id="results" class="results" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <dialog id="session-dialog">
+      <div class="dialog-head">
+        <div>
+          <span class="source-badge" id="dialog-source"></span>
+          <h2 id="dialog-title"></h2>
+        </div>
+        <button class="icon-button" id="close-dialog" aria-label="Close">×</button>
+      </div>
+      <div class="dialog-actions">
+        <button class="primary-button" id="copy-reference">复制给智能体的引用</button>
+        <code id="dialog-id"></code>
+      </div>
+      <div class="conversation" id="conversation"></div>
+    </dialog>
+
+    <template id="result-template">
+      <article class="result-card" tabindex="0">
+        <div class="card-meta">
+          <span class="source-badge"></span>
+          <time></time>
+          <span class="message-count"></span>
+        </div>
+        <h3></h3>
+        <p class="snippet"></p>
+        <div class="card-foot">
+          <code class="cwd"></code>
+          <span class="open-label">读取会话 →</span>
+        </div>
+      </article>
+    </template>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

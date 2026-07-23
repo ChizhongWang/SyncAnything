@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.1 1.5 104.2 91.1">
+  <path d="M 42.5,4.46 L 76.62,63.56 L 38.38,63.56 L 30.88,76.55 L 99.12,76.55 L 57.5,4.46 Z" fill="none" stroke="#10B981" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M 8.38,89.54 L 42.5,30.44 L 61.63,63.56 L 76.62,63.56 L 42.5,4.46 L 0.88,76.55 Z" fill="none" stroke="#10B981" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M 99.12,76.55 L 30.88,76.55 L 50.0,43.43 L 42.5,30.44 L 8.38,89.54 L 91.62,89.54 Z" fill="none" stroke="#10B981" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M 42.5,4.46 L 57.5,4.46 L 65.0,17.45 L 50.0,17.45 Z" fill="#10B981" stroke="#10B981" stroke-width="3"/>
+  <path d="M 42.5,4.46 L 35.0,17.45 L 42.5,30.44 L 50.0,17.45 Z" fill="#10B981" stroke="#10B981" stroke-width="3"/>
+  <path d="M 99.12,76.55 L 91.62,89.54 L 76.62,89.54 L 84.12,76.55 Z" fill="#10B981" stroke="#10B981" stroke-width="3"/>
+  <path d="M 99.12,76.55 L 91.62,63.56 L 76.62,63.56 L 84.12,76.55 Z" fill="#10B981" stroke="#10B981" stroke-width="3"/>
+  <path d="M 8.38,89.54 L 0.88,76.55 L 8.38,63.56 L 15.88,76.55 Z" fill="#10B981" stroke="#10B981" stroke-width="3"/>
+  <path d="M 8.38,89.54 L 23.38,89.54 L 30.88,76.55 L 15.88,76.55 Z" fill="#10B981" stroke="#10B981" stroke-width="3"/>
+</svg>

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syncanything"
+version = "0.1.0"
+description = "An agent-native context index across AI products."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Chizhong Wang" }]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/ChizhongWang/syncanything"
+Repository = "https://github.com/ChizhongWang/syncanything"
+
+[project.scripts]
+syncanything = "syncanything.cli:main"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+syncanything = ["static/*"]
