@@ -72,9 +72,12 @@ class AdapterTests(unittest.TestCase):
                 cache_root=Path(directory),
                 base_url="https://citeanything.example",
                 api_key="",
+                connections=[],
             ).parse(path)
             assert session is not None
-            self.assertEqual(session.id, "citeanything:42")
+            self.assertEqual(
+                session.id, "citeanything:citeanything-example:42"
+            )
             self.assertEqual(session.metadata["runtime"], "claude-code")
             self.assertEqual(
                 session.metadata["execution_session_id"], "underlying-claude-session"
@@ -83,6 +86,29 @@ class AdapterTests(unittest.TestCase):
                 [message.text for message in session.messages],
                 ["帮我核实这项数据", "已找到一手来源。"],
             )
+
+    def test_citeanything_namespaces_sessions_by_connection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "conversation-42.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "id": 42,
+                        "_syncanything_base_url": "https://citeanything.cn",
+                        "_syncanything_connection_id": "china-account",
+                        "events": [
+                            {"type": "user", "message": {"role": "user", "content": "梁文锋"}}
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            adapter = CiteAnythingAdapter(cache_root=Path(directory), connections=[])
+            session = adapter.parse(path)
+            assert session is not None
+            self.assertEqual(session.id, "citeanything:china-account:42")
+            self.assertEqual(session.metadata["connection"], "china-account")
 
     def test_claude_visible_conversation_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -15,6 +15,7 @@
         <small>by VeriGlow</small>
       </a>
       <div class="status" id="status">正在读取本地索引…</div>
+      <button class="quiet-button" id="connections-button">连接</button>
       <button class="quiet-button" id="reindex">刷新索引</button>
     </header>
 
@@ -48,6 +49,47 @@
         <div id="results" class="results" aria-live="polite"></div>
       </section>
     </main>
+
+    <dialog id="connections-dialog" class="connections-dialog">
+      <div class="dialog-head">
+        <div>
+          <span class="source-badge">CiteAnything</span>
+          <h2>连接账号</h2>
+        </div>
+        <button class="icon-button" id="close-connections" aria-label="Close">×</button>
+      </div>
+      <div class="connections-content">
+        <p class="connection-help">每个站点和账号授权一次。密钥保存在这台 Mac 的钥匙串中，不会进入会话索引。</p>
+        <div id="connections-list" class="connections-list"></div>
+        <form id="connection-form">
+          <label>
+            站点
+            <select id="connection-site">
+              <option value="china">中国站 · citeanything.cn</option>
+              <option value="international">国际站 · citeanything.veri-glow.com</option>
+              <option value="custom">自定义</option>
+            </select>
+          </label>
+          <label>
+            连接名称
+            <input id="connection-name" value="CiteAnything 中国站" required />
+          </label>
+          <label id="base-url-label" hidden>
+            站点地址
+            <input id="connection-base-url" type="url" placeholder="https://…" />
+          </label>
+          <label>
+            SyncAnything API key
+            <input id="connection-key" type="password" autocomplete="off" required />
+          </label>
+          <p class="form-hint">请在对应 CiteAnything 站点点击“Connect SyncAnything”生成专用密钥。</p>
+          <div class="connection-form-actions">
+            <span id="connection-message"></span>
+            <button class="primary-button" type="submit">验证并连接</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
 
     <dialog id="session-dialog">
       <div class="dialog-head">

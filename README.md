@@ -23,9 +23,11 @@ System prompts, developer messages, reasoning blocks, tool calls, tool output, i
 
 ## Connect CiteAnything
 
-CiteAnything is identified as its own product even when its current execution runtime is Claude Code. A connected conversation therefore keeps a stable ID such as `citeanything:42`; its underlying Claude Code, Codex CLI, or Grok Build session ID is only runtime metadata.
+CiteAnything is identified as its own product even when its current execution runtime is Claude Code. A connected conversation therefore keeps a namespaced ID such as `citeanything:china-account:42`; its underlying Claude Code, Codex CLI, or Grok Build session ID is only runtime metadata.
 
-In CiteAnything, use **Take CiteAnything Home → Connect SyncAnything**, then provide that dedicated key to the SyncAnything process:
+In the local web interface, choose **连接** and add each CiteAnything site/account you want to search. International and China accounts can be connected at the same time. In CiteAnything, use **Take CiteAnything Home → Connect SyncAnything** to create the dedicated key. On macOS, SyncAnything stores it in Keychain and never writes it to the SQLite index, connection metadata, or repository.
+
+For a single headless connection, environment variables remain available:
 
 ```bash
 export SYNCANYTHING_CITEANYTHING_API_KEY="ca_your_context_read_key"
@@ -34,7 +36,7 @@ export CITEANYTHING_BASE_URL="https://citeanything.veri-glow.com"
 ./bin/syncanything serve --no-index
 ```
 
-For the China service, use `https://citeanything.cn`. Generate this dedicated `context.read` key with CiteAnything's **Connect SyncAnything** action. Do not reuse the `CITEANYTHING_API_KEY` used by the CiteAnything skill. The key is read from the process environment and is never written to the index or repository. SyncAnything keeps a local read-only snapshot under `~/.syncanything/connectors/citeanything/`; CiteAnything remains the source of truth.
+For the China service, use `https://citeanything.cn`. Do not reuse the `CITEANYTHING_API_KEY` used by the CiteAnything skill. SyncAnything keeps a local read-only snapshot under `~/.syncanything/connectors/citeanything/`; CiteAnything remains the source of truth.
 
 ## Quick start
 

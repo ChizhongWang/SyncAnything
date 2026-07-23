@@ -4,6 +4,7 @@ const resultsNode = document.querySelector("#results");
 const resultTitle = document.querySelector("#result-title");
 const resultCount = document.querySelector("#result-count");
 const dialog = document.querySelector("#session-dialog");
+const connectionsDialog = document.querySelector("#connections-dialog");
 let searchTimer;
 
 const sourceNames = { claude: "Claude Code", codex: "Codex", kimi: "Kimi Code", pi: "Pi", citeanything: "CiteAnything" };
@@ -26,8 +27,39 @@ function shortDate(value) {
 
 async function getJson(url, options) {
   const response = await fetch(url, options);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json();
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
+}
+
+async function loadConnections() {
+  const data = await getJson("/api/connections");
+  const list = document.querySelector("#connections-list");
+  list.innerHTML = "";
+  if (!data.citeanything.length) {
+    list.innerHTML = '<div class="connection-empty">尚未连接 CiteAnything 账号</div>';
+    return;
+  }
+  for (const item of data.citeanything) {
+    const node = document.createElement("div");
+    node.className = "connection-item";
+    const text = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = item.name;
+    const detail = document.createElement("small");
+    detail.textContent = `${item.base_url} · ${item.connected ? "已授权" : "密钥缺失"}`;
+    text.append(title, detail);
+    const remove = document.createElement("button");
+    remove.className = "quiet-button";
+    remove.textContent = "移除";
+    remove.type = "button";
+    remove.addEventListener("click", async () => {
+      await getJson(`/api/connections/citeanything/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      await loadConnections();
+    });
+    node.append(text, remove);
+    list.append(node);
+  }
 }
 
 async function loadStatus() {
@@ -117,6 +149,51 @@ document.querySelector("#reindex").addEventListener("click", async event => {
 });
 
 document.querySelector("#close-dialog").addEventListener("click", () => dialog.close());
+document.querySelector("#connections-button").addEventListener("click", async () => {
+  connectionsDialog.showModal();
+  await loadConnections();
+});
+document.querySelector("#close-connections").addEventListener("click", () => connectionsDialog.close());
+
+document.querySelector("#connection-site").addEventListener("change", event => {
+  const site = event.currentTarget.value;
+  document.querySelector("#base-url-label").hidden = site !== "custom";
+  document.querySelector("#connection-name").value =
+    site === "china" ? "CiteAnything 中国站" :
+    site === "international" ? "CiteAnything 国际站" : "CiteAnything";
+});
+
+document.querySelector("#connection-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector('button[type="submit"]');
+  const message = document.querySelector("#connection-message");
+  button.disabled = true;
+  button.textContent = "正在验证并同步…";
+  message.textContent = "";
+  try {
+    const site = document.querySelector("#connection-site").value;
+    const payload = {
+      site,
+      name: document.querySelector("#connection-name").value.trim(),
+      api_key: document.querySelector("#connection-key").value.trim(),
+    };
+    if (site === "custom") payload.base_url = document.querySelector("#connection-base-url").value.trim();
+    await getJson("/api/connections/citeanything", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    document.querySelector("#connection-key").value = "";
+    message.textContent = "连接成功，会话已同步";
+    await Promise.all([loadConnections(), loadStatus(), loadResults()]);
+  } catch (error) {
+    message.textContent = error.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = "验证并连接";
+  }
+});
+
 document.querySelector("#copy-reference").addEventListener("click", async event => {
   const session = state.activeSession;
   if (!session) return;

@@ -5,9 +5,12 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.resources import files
 from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError, URLError
 
+from syncanything.connections import ConnectionStore, SITE_URLS
 from syncanything.index import ConversationIndex
 from syncanything.service import SyncAnythingService
+from syncanything.sources.citeanything import CiteAnythingAdapter
 
 
 class SyncAnythingHandler(BaseHTTPRequestHandler):
@@ -18,6 +21,9 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/status":
             self._json(self.index.stats())
+            return
+        if parsed.path == "/api/connections":
+            self._json({"citeanything": ConnectionStore().public_connections()})
             return
         if parsed.path == "/api/sessions":
             query = parse_qs(parsed.query)
@@ -51,11 +57,52 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/api/reindex":
+        path = urlparse(self.path).path
+        if path == "/api/connections/citeanything":
+            self._add_citeanything_connection()
+            return
+        if path != "/api/reindex":
             self.send_error(HTTPStatus.NOT_FOUND)
             return
         report = self.index.index_all()
         self._json(report)
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+        prefix = "/api/connections/citeanything/"
+        if not path.startswith(prefix):
+            self.send_error(HTTPStatus.NOT_FOUND)
+            return
+        connection_id = path[len(prefix) :]
+        removed = ConnectionStore().remove_citeanything(connection_id)
+        self._json({"removed": removed}, HTTPStatus.OK if removed else HTTPStatus.NOT_FOUND)
+
+    def _add_citeanything_connection(self) -> None:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 32_768:
+                raise ValueError("请求内容无效")
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            site = str(payload.get("site") or "custom")
+            base_url = str(payload.get("base_url") or SITE_URLS.get(site, "")).rstrip("/")
+            name = str(payload.get("name") or ("CiteAnything 中国站" if site == "china" else "CiteAnything 国际站"))
+            api_key = str(payload.get("api_key") or "").strip()
+            CiteAnythingAdapter(connections=[]).validate(base_url, api_key)
+            connection = ConnectionStore().add_citeanything(name, base_url, api_key, site)
+            report = self.index.index_all()
+            self._json(
+                {"connection": connection.public_dict(True), "index": report},
+                HTTPStatus.CREATED,
+            )
+        except HTTPError as error:
+            self._json(
+                {"error": f"CiteAnything 拒绝了该密钥（HTTP {error.code}）"},
+                HTTPStatus.UNAUTHORIZED,
+            )
+        except (URLError, TimeoutError, OSError) as error:
+            self._json({"error": f"无法连接 CiteAnything：{error}"}, HTTPStatus.BAD_GATEWAY)
+        except (ValueError, RuntimeError, json.JSONDecodeError) as error:
+            self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
 
     def _static(self, name: str, content_type: str) -> None:
         data = files("syncanything.static").joinpath(name).read_bytes()
