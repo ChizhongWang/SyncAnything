@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from syncanything.connections import ConnectionStore, syncanything_home
 from syncanything.index import ConversationIndex
 from syncanything.mcp import McpServer
 from syncanything.sources.citeanything import CiteAnythingAdapter
@@ -22,6 +24,11 @@ def write_jsonl(path: Path, records: list[dict]) -> None:
 
 
 class AdapterTests(unittest.TestCase):
+    def test_syncanything_home_uses_env_without_expanding_home(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"SYNCANYTHING_HOME": directory}, clear=True):
+                self.assertEqual(syncanything_home(), Path(directory))
+
     def test_citeanything_does_not_reuse_skill_key(self) -> None:
         with patch.dict(
             os.environ,
@@ -109,6 +116,45 @@ class AdapterTests(unittest.TestCase):
             assert session is not None
             self.assertEqual(session.id, "citeanything:china-account:42")
             self.assertEqual(session.metadata["connection"], "china-account")
+
+    @unittest.skipUnless(platform.system() == "Windows", "Windows DPAPI only")
+    def test_windows_secret_store_round_trips_api_key(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = ConnectionStore(Path(directory))
+            store.set_secret("china-account", "ca_secret_123")
+            self.assertEqual(store.get_secret("china-account"), "ca_secret_123")
+            store.delete_secret("china-account")
+            self.assertEqual(store.get_secret("china-account"), "")
+
+    @patch("syncanything.connections.platform.system", return_value="Windows")
+    @patch(
+        "syncanything.connections._unprotect_windows_secret",
+        return_value="ca_secret_123",
+    )
+    @patch(
+        "syncanything.connections._protect_windows_secret",
+        return_value="encrypted-by-dpapi",
+    )
+    def test_windows_secret_store_uses_separate_encrypted_file(
+        self,
+        protect,
+        unprotect,
+        system,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = ConnectionStore(Path(directory))
+            store.set_secret("china/account", "ca_secret_123")
+
+            secret_path = (
+                Path(directory) / "secrets" / "citeanything-china_account.dpapi"
+            )
+            self.assertEqual(secret_path.read_text().strip(), "encrypted-by-dpapi")
+            self.assertEqual(store.get_secret("china/account"), "ca_secret_123")
+            protect.assert_called_once_with("ca_secret_123")
+            unprotect.assert_called_once_with("encrypted-by-dpapi")
+
+            store.delete_secret("china/account")
+            self.assertFalse(secret_path.exists())
 
     def test_claude_visible_conversation_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
