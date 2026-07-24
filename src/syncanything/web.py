@@ -37,7 +37,8 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
             source = query.get("source", [None])[0] or None
             limit = int(query.get("limit", ["50"])[0])
             results = self.service.search_sessions(phrase, source=source, limit=limit)
-            self._json({"results": results})
+            total = self.service.count_sessions(phrase, source=source)
+            self._json({"results": results, "total": total})
             return
         if parsed.path == "/api/session":
             query = parse_qs(parsed.query)

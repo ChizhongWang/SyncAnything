@@ -82,7 +82,10 @@ async function loadResults() {
   if (state.source) params.set("source", state.source);
   const data = await getJson(`/api/sessions?${params}`);
   resultTitle.textContent = state.query ? `“${state.query}”的结果` : "最近的会话";
-  resultCount.textContent = `${data.results.length} 个`;
+  resultCount.textContent =
+    data.total > data.results.length
+      ? `显示 ${data.results.length} / 共 ${data.total} 个`
+      : `${data.total} 个`;
   renderResults(data.results);
 }
 
