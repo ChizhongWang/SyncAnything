@@ -6,6 +6,9 @@ import platform
 import re
 import subprocess
 import uuid
+import base64
+import ctypes
+from ctypes import wintypes
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -19,9 +22,72 @@ SITE_URLS = {
 
 
 def syncanything_home() -> Path:
-    return Path(
-        os.environ.get("SYNCANYTHING_HOME", Path.home() / ".syncanything")
-    ).expanduser()
+    configured = os.environ.get("SYNCANYTHING_HOME")
+    if configured:
+        return Path(configured).expanduser()
+    try:
+        return Path.home() / ".syncanything"
+    except RuntimeError:
+        return Path.cwd() / ".syncanything"
+
+
+class DATA_BLOB(ctypes.Structure):
+    _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_ubyte))]
+
+
+def _windows_secret_path(home: Path, connection_id: str) -> Path:
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", connection_id)
+    return home / "secrets" / f"citeanything-{safe_id}.dpapi"
+
+
+def _blob_from_bytes(data: bytes) -> tuple[DATA_BLOB, ctypes.Array[ctypes.c_ubyte]]:
+    buffer = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
+    return DATA_BLOB(len(data), buffer), buffer
+
+
+def _bytes_from_blob(blob: DATA_BLOB) -> bytes:
+    try:
+        return ctypes.string_at(blob.pbData, blob.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(blob.pbData)
+
+
+def _protect_windows_secret(secret: str) -> str:
+    plain_blob, plain_buffer = _blob_from_bytes(secret.encode("utf-8"))
+    encrypted_blob = DATA_BLOB()
+    description = "SyncAnything CiteAnything API key"
+    ok = ctypes.windll.crypt32.CryptProtectData(
+        ctypes.byref(plain_blob),
+        description,
+        None,
+        None,
+        None,
+        0,
+        ctypes.byref(encrypted_blob),
+    )
+    _ = plain_buffer
+    if not ok:
+        raise ctypes.WinError()
+    return base64.b64encode(_bytes_from_blob(encrypted_blob)).decode("ascii")
+
+
+def _unprotect_windows_secret(encoded: str) -> str:
+    encrypted = base64.b64decode(encoded.encode("ascii"))
+    encrypted_blob, encrypted_buffer = _blob_from_bytes(encrypted)
+    plain_blob = DATA_BLOB()
+    ok = ctypes.windll.crypt32.CryptUnprotectData(
+        ctypes.byref(encrypted_blob),
+        None,
+        None,
+        None,
+        None,
+        0,
+        ctypes.byref(plain_blob),
+    )
+    _ = encrypted_buffer
+    if not ok:
+        return ""
+    return _bytes_from_blob(plain_blob).decode("utf-8")
 
 
 @dataclass(slots=True)
@@ -102,6 +168,12 @@ class ConnectionStore:
         return True
 
     def get_secret(self, connection_id: str) -> str:
+        if platform.system() == "Windows":
+            path = _windows_secret_path(self.home, connection_id)
+            try:
+                return _unprotect_windows_secret(path.read_text(encoding="ascii").strip())
+            except (OSError, ValueError, UnicodeDecodeError):
+                return ""
         if platform.system() != "Darwin":
             return ""
         result = subprocess.run(
@@ -121,6 +193,13 @@ class ConnectionStore:
         return result.stdout.strip() if result.returncode == 0 else ""
 
     def set_secret(self, connection_id: str, api_key: str) -> None:
+        if platform.system() == "Windows":
+            path = _windows_secret_path(self.home, connection_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_suffix(".dpapi.tmp")
+            temporary.write_text(_protect_windows_secret(api_key) + "\n", encoding="ascii")
+            temporary.replace(path)
+            return
         if platform.system() != "Darwin":
             raise RuntimeError("当前版本仅支持在 macOS 钥匙串中保存连接密钥")
         result = subprocess.run(
@@ -143,6 +222,12 @@ class ConnectionStore:
             raise RuntimeError(result.stderr.strip() or "无法写入 macOS 钥匙串")
 
     def delete_secret(self, connection_id: str) -> None:
+        if platform.system() == "Windows":
+            try:
+                _windows_secret_path(self.home, connection_id).unlink()
+            except FileNotFoundError:
+                pass
+            return
         if platform.system() == "Darwin":
             subprocess.run(
                 [
