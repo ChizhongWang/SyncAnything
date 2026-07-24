@@ -246,6 +246,31 @@ class AdapterTests(unittest.TestCase):
 
 
 class IndexAndMcpTests(unittest.TestCase):
+    def test_count_search_reports_matches_beyond_result_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sessions = root / "sessions"
+            for number in range(3):
+                write_jsonl(
+                    sessions / f"s{number}.jsonl",
+                    [
+                        {
+                            "type": "user",
+                            "sessionId": f"s{number}",
+                            "message": {
+                                "role": "user",
+                                "content": f"共同检索词，第 {number + 1} 个会话",
+                            },
+                        }
+                    ],
+                )
+
+            with ConversationIndex(root / "index.db") as index:
+                report = index.index_all([ClaudeAdapter(sessions)])
+                self.assertEqual(report["indexed"], 3)
+                self.assertEqual(len(index.search("共同检索词", limit=1)), 1)
+                self.assertEqual(index.count_search("共同检索词"), 3)
+
     def test_chinese_search_and_mcp(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
