@@ -49,6 +49,17 @@ cd syncanything
 
 Open `http://127.0.0.1:7331`.
 
+On Windows PowerShell, install the package into a local virtual environment first:
+
+```powershell
+git clone https://github.com/ChizhongWang/syncanything.git
+cd syncanything
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\syncanything.exe index
+.\.venv\Scripts\syncanything.exe serve
+```
+
 ## CLI
 
 ```bash
