@@ -218,6 +218,17 @@ class ConversationIndex:
         ).fetchall()
         return [self._present_result(row) for row in rows]
 
+    def count_sessions(self, source: str | None = None) -> int:
+        if source:
+            row = self.connection.execute(
+                "SELECT COUNT(*) AS count FROM sessions WHERE source = ?", (source,)
+            ).fetchone()
+        else:
+            row = self.connection.execute(
+                "SELECT COUNT(*) AS count FROM sessions"
+            ).fetchone()
+        return int(row["count"] if row else 0)
+
     def search(
         self,
         query: str,
@@ -234,6 +245,17 @@ class ConversationIndex:
             except sqlite3.OperationalError:
                 pass
         return self._search_like(query, source, limit)
+
+    def count_search(self, query: str, source: str | None = None) -> int:
+        query = query.strip()
+        if not query:
+            return self.count_sessions(source=source)
+        if len(query) >= 3:
+            try:
+                return self._count_search_fts(query, source)
+            except sqlite3.OperationalError:
+                pass
+        return self._count_search_like(query, source)
 
     def _search_fts(self, query: str, source: str | None, limit: int) -> list[dict[str, Any]]:
         phrase = '"' + query.replace('"', '""') + '"'
@@ -280,6 +302,39 @@ class ConversationIndex:
         for result in results:
             result["snippet"] = self._plain_snippet(result["snippet"], query)
         return results
+
+    def _count_search_fts(self, query: str, source: str | None) -> int:
+        phrase = '"' + query.replace('"', '""') + '"'
+        source_clause = "AND s.source = ?" if source else ""
+        params: list[Any] = [phrase]
+        if source:
+            params.append(source)
+        row = self.connection.execute(
+            f"""
+            SELECT COUNT(DISTINCT s.id) AS count
+            FROM messages_fts
+            JOIN sessions s ON s.id = messages_fts.session_id
+            WHERE messages_fts MATCH ? {source_clause}
+            """,
+            params,
+        ).fetchone()
+        return int(row["count"] if row else 0)
+
+    def _count_search_like(self, query: str, source: str | None) -> int:
+        source_clause = "AND s.source = ?" if source else ""
+        params: list[Any] = [f"%{query}%"]
+        if source:
+            params.append(source)
+        row = self.connection.execute(
+            f"""
+            SELECT COUNT(DISTINCT s.id) AS count
+            FROM messages m
+            JOIN sessions s ON s.id = m.session_id
+            WHERE m.text LIKE ? {source_clause}
+            """,
+            params,
+        ).fetchone()
+        return int(row["count"] if row else 0)
 
     @staticmethod
     def _deduplicate_results(rows: Iterable[sqlite3.Row], limit: int) -> list[dict[str, Any]]:

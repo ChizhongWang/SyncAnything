@@ -215,6 +215,8 @@ class IndexAndMcpTests(unittest.TestCase):
             with ConversationIndex(root / "index.db") as index:
                 report = index.index_all([adapter])
                 self.assertEqual(report["indexed"], 1)
+                self.assertEqual(index.count_search("", source="claude"), 1)
+                self.assertEqual(index.count_search("记忆不应该绑定", source="claude"), 1)
                 results = index.search("记忆不应该绑定")
                 self.assertEqual(results[0]["id"], "claude:s1")
 
