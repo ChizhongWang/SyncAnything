@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import base64
+import ctypes
 import json
 import os
 import platform
 import re
 import subprocess
 import uuid
-import base64
-import ctypes
 from ctypes import wintypes
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -35,6 +35,44 @@ class DATA_BLOB(ctypes.Structure):
     _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_ubyte))]
 
 
+CRYPTPROTECT_UI_FORBIDDEN = 0x1
+
+
+def _windows_crypto() -> tuple[Any, Any, Any]:
+    """Return type-safe DPAPI functions, loaded only on Windows."""
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+    protect = crypt32.CryptProtectData
+    protect.argtypes = [
+        ctypes.POINTER(DATA_BLOB),
+        wintypes.LPCWSTR,
+        ctypes.POINTER(DATA_BLOB),
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(DATA_BLOB),
+    ]
+    protect.restype = wintypes.BOOL
+
+    unprotect = crypt32.CryptUnprotectData
+    unprotect.argtypes = [
+        ctypes.POINTER(DATA_BLOB),
+        ctypes.POINTER(wintypes.LPWSTR),
+        ctypes.POINTER(DATA_BLOB),
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(DATA_BLOB),
+    ]
+    unprotect.restype = wintypes.BOOL
+
+    local_free = kernel32.LocalFree
+    local_free.argtypes = [ctypes.c_void_p]
+    local_free.restype = ctypes.c_void_p
+    return protect, unprotect, local_free
+
+
 def _windows_secret_path(home: Path, connection_id: str) -> Path:
     safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", connection_id)
     return home / "secrets" / f"citeanything-{safe_id}.dpapi"
@@ -45,49 +83,50 @@ def _blob_from_bytes(data: bytes) -> tuple[DATA_BLOB, ctypes.Array[ctypes.c_ubyt
     return DATA_BLOB(len(data), buffer), buffer
 
 
-def _bytes_from_blob(blob: DATA_BLOB) -> bytes:
+def _bytes_from_blob(blob: DATA_BLOB, local_free: Any) -> bytes:
     try:
         return ctypes.string_at(blob.pbData, blob.cbData)
     finally:
-        ctypes.windll.kernel32.LocalFree(blob.pbData)
+        local_free(ctypes.cast(blob.pbData, ctypes.c_void_p))
 
 
 def _protect_windows_secret(secret: str) -> str:
+    protect, _, local_free = _windows_crypto()
     plain_blob, plain_buffer = _blob_from_bytes(secret.encode("utf-8"))
     encrypted_blob = DATA_BLOB()
-    description = "SyncAnything CiteAnything API key"
-    ok = ctypes.windll.crypt32.CryptProtectData(
+    ok = protect(
         ctypes.byref(plain_blob),
-        description,
+        "SyncAnything CiteAnything API key",
         None,
         None,
         None,
-        0,
+        CRYPTPROTECT_UI_FORBIDDEN,
         ctypes.byref(encrypted_blob),
     )
     _ = plain_buffer
     if not ok:
         raise ctypes.WinError()
-    return base64.b64encode(_bytes_from_blob(encrypted_blob)).decode("ascii")
+    return base64.b64encode(_bytes_from_blob(encrypted_blob, local_free)).decode("ascii")
 
 
 def _unprotect_windows_secret(encoded: str) -> str:
+    _, unprotect, local_free = _windows_crypto()
     encrypted = base64.b64decode(encoded.encode("ascii"))
     encrypted_blob, encrypted_buffer = _blob_from_bytes(encrypted)
     plain_blob = DATA_BLOB()
-    ok = ctypes.windll.crypt32.CryptUnprotectData(
+    ok = unprotect(
         ctypes.byref(encrypted_blob),
         None,
         None,
         None,
         None,
-        0,
+        CRYPTPROTECT_UI_FORBIDDEN,
         ctypes.byref(plain_blob),
     )
     _ = encrypted_buffer
     if not ok:
         return ""
-    return _bytes_from_blob(plain_blob).decode("utf-8")
+    return _bytes_from_blob(plain_blob, local_free).decode("utf-8")
 
 
 @dataclass(slots=True)

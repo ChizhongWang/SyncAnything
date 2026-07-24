@@ -126,6 +126,36 @@ class AdapterTests(unittest.TestCase):
             store.delete_secret("china-account")
             self.assertEqual(store.get_secret("china-account"), "")
 
+    @patch("syncanything.connections.platform.system", return_value="Windows")
+    @patch(
+        "syncanything.connections._unprotect_windows_secret",
+        return_value="ca_secret_123",
+    )
+    @patch(
+        "syncanything.connections._protect_windows_secret",
+        return_value="encrypted-by-dpapi",
+    )
+    def test_windows_secret_store_uses_separate_encrypted_file(
+        self,
+        protect,
+        unprotect,
+        system,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = ConnectionStore(Path(directory))
+            store.set_secret("china/account", "ca_secret_123")
+
+            secret_path = (
+                Path(directory) / "secrets" / "citeanything-china_account.dpapi"
+            )
+            self.assertEqual(secret_path.read_text().strip(), "encrypted-by-dpapi")
+            self.assertEqual(store.get_secret("china/account"), "ca_secret_123")
+            protect.assert_called_once_with("ca_secret_123")
+            unprotect.assert_called_once_with("encrypted-by-dpapi")
+
+            store.delete_secret("china/account")
+            self.assertFalse(secret_path.exists())
+
     def test_claude_visible_conversation_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "project" / "session-1.jsonl"
