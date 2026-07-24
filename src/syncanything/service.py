@@ -14,6 +14,9 @@ class SyncAnythingService:
     ) -> list[dict[str, Any]]:
         return self.index.search(query=query, source=source, limit=limit)
 
+    def count_sessions(self, query: str = "", source: str | None = None) -> int:
+        return self.index.count_search(query=query, source=source)
+
     def list_sessions(self, source: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         return self.index.list_sessions(source=source, limit=limit)
 
