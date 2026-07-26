@@ -109,6 +109,20 @@ dialog::backdrop { background: rgba(20, 35, 29, .38); backdrop-filter: blur(4px)
 .conversation { padding: 12px 26px 32px; }
 .message { padding: 18px 0; border-bottom: 1px solid #edf1ef; }
 .message:last-child { border-bottom: 0; }
+.message.match-target {
+  margin: 10px -14px;
+  padding: 18px 14px;
+  border: 1px solid #9edfc5;
+  border-radius: 12px;
+  background: rgba(201, 245, 223, .26);
+  box-shadow: 0 8px 28px rgba(25, 105, 75, .08);
+}
+.match-highlight {
+  background: #9ce8c2;
+  color: inherit;
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px rgba(21, 151, 101, .16);
+}
 .message-role { margin-bottom: 9px; color: var(--green-dark); font-size: 11px; text-transform: uppercase; letter-spacing: .12em; font-weight: 750; }
 .message.assistant .message-role { color: #65736d; }
 .message-text { white-space: pre-wrap; line-height: 1.65; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px; overflow-wrap: anywhere; }
