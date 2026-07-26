@@ -268,6 +268,12 @@ class ConversationIndex:
             f"""
             SELECT s.id, s.source, s.native_id, s.title, s.cwd, s.updated_at,
                    s.source_path, s.message_count, s.metadata_json,
+                   (
+                     SELECT MIN(m.ordinal)
+                     FROM messages m
+                     WHERE m.session_id = s.id
+                       AND m.text = messages_fts.text
+                   ) AS match_ordinal,
                    snippet(messages_fts, 1, '<mark>', '</mark>', '…', 28) AS snippet,
                    bm25(messages_fts) AS rank
             FROM messages_fts
@@ -289,7 +295,8 @@ class ConversationIndex:
         rows = self.connection.execute(
             f"""
             SELECT s.id, s.source, s.native_id, s.title, s.cwd, s.updated_at,
-                   s.source_path, s.message_count, s.metadata_json, m.text AS snippet, 0 AS rank
+                   s.source_path, s.message_count, s.metadata_json,
+                   m.ordinal AS match_ordinal, m.text AS snippet, 0 AS rank
             FROM messages m
             JOIN sessions s ON s.id = m.session_id
             WHERE m.text LIKE ? {source_clause}
