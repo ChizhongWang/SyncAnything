@@ -43,7 +43,17 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/session":
             query = parse_qs(parsed.query)
             session_id = query.get("id", [""])[0]
-            session = self.service.get_session(session_id, max_chars=100_000)
+            focus_value = query.get("focus_ordinal", [""])[0]
+            try:
+                focus_ordinal = int(focus_value) if focus_value != "" else None
+            except ValueError:
+                focus_ordinal = None
+            session = self.service.get_session(
+                session_id,
+                max_chars=100_000,
+                focus_ordinal=focus_ordinal,
+                focus_query=query.get("focus_query", [""])[0],
+            )
             if session is None:
                 self._json({"error": "Session not found"}, HTTPStatus.NOT_FOUND)
             else:

@@ -19,6 +19,37 @@ function safeSnippet(value = "") {
     .replaceAll("&lt;/mark&gt;", "</mark>");
 }
 
+function appendHighlightedText(node, value, query) {
+  const position = query ? value.toLocaleLowerCase().indexOf(query.toLocaleLowerCase()) : -1;
+  if (position < 0) {
+    node.textContent = value;
+    return null;
+  }
+  node.append(document.createTextNode(value.slice(0, position)));
+  const mark = document.createElement("mark");
+  mark.className = "match-highlight";
+  mark.textContent = value.slice(position, position + query.length);
+  node.append(mark, document.createTextNode(value.slice(position + query.length)));
+  return mark;
+}
+
+function centerDialogTarget(target) {
+  if (!target || !dialog.open) return;
+  const dialogRect = dialog.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  dialog.scrollTo({
+    top: Math.max(
+      0,
+      dialog.scrollTop +
+        targetRect.top +
+        targetRect.height / 2 -
+        dialogRect.top -
+        dialogRect.height / 2,
+    ),
+    behavior: "auto",
+  });
+}
+
 function shortDate(value) {
   if (!value) return "时间未知";
   const date = new Date(value);
@@ -78,18 +109,21 @@ async function loadStatus() {
 
 async function loadResults() {
   resultsNode.innerHTML = '<div class="empty">正在检索…</div>';
-  const params = new URLSearchParams({ q: state.query, limit: "60" });
-  if (state.source) params.set("source", state.source);
+  const requestedQuery = state.query;
+  const requestedSource = state.source;
+  const params = new URLSearchParams({ q: requestedQuery, limit: "60" });
+  if (requestedSource) params.set("source", requestedSource);
   const data = await getJson(`/api/sessions?${params}`);
-  resultTitle.textContent = state.query ? `“${state.query}”的结果` : "最近的会话";
+  if (requestedQuery !== state.query || requestedSource !== state.source) return;
+  resultTitle.textContent = requestedQuery ? `“${requestedQuery}”的结果` : "最近的会话";
   resultCount.textContent =
     data.total > data.results.length
       ? `显示 ${data.results.length} / 共 ${data.total} 个`
       : `${data.total} 个`;
-  renderResults(data.results);
+  renderResults(data.results, requestedQuery);
 }
 
-function renderResults(results) {
+function renderResults(results, resultQuery = "") {
   resultsNode.innerHTML = "";
   if (!results.length) {
     resultsNode.innerHTML = '<div class="empty">没有找到匹配的会话。试试更接近原话的关键词。</div>';
@@ -106,33 +140,56 @@ function renderResults(results) {
     if (item.snippet) snippet.innerHTML = safeSnippet(item.snippet.replaceAll("\n", " "));
     else snippet.textContent = "打开查看会话内容";
     card.querySelector(".cwd").textContent = item.cwd || item.canonical_url || item.source_path;
-    card.addEventListener("click", () => openSession(item.id));
-    card.addEventListener("keydown", event => { if (event.key === "Enter") openSession(item.id); });
+    card.addEventListener("click", () => openSession(item, resultQuery));
+    card.addEventListener("keydown", event => {
+      if (event.key === "Enter") openSession(item, resultQuery);
+    });
     resultsNode.append(card);
   }
 }
 
-async function openSession(sessionId) {
-  const session = await getJson(`/api/session?id=${encodeURIComponent(sessionId)}`);
+async function openSession(item, query) {
+  const params = new URLSearchParams({ id: item.id });
+  if (Number.isInteger(item.match_ordinal)) {
+    params.set("focus_ordinal", String(item.match_ordinal));
+  }
+  if (query) params.set("focus_query", query);
+  const session = await getJson(`/api/session?${params}`);
   state.activeSession = session;
   document.querySelector("#dialog-source").textContent = sourceNames[session.source] || session.source;
   document.querySelector("#dialog-title").textContent = session.title;
   document.querySelector("#dialog-id").textContent = session.id;
   const conversation = document.querySelector("#conversation");
   conversation.innerHTML = "";
+  let targetMessage = null;
+  let targetMark = null;
   for (const message of session.messages) {
     const node = document.createElement("section");
     node.className = `message ${message.role}`;
+    node.dataset.ordinal = String(message.ordinal);
     const role = document.createElement("div");
     role.className = "message-role";
     role.textContent = message.role === "user" ? "User" : "Assistant";
     const text = document.createElement("div");
     text.className = "message-text";
-    text.textContent = message.text;
+    const isTarget =
+      message.ordinal === item.match_ordinal ||
+      (targetMessage === null && query && message.text.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+    if (isTarget && targetMessage === null) {
+      node.classList.add("match-target");
+      targetMessage = node;
+      targetMark = appendHighlightedText(text, message.text, query);
+    } else {
+      text.textContent = message.text;
+    }
     node.append(role, text);
     conversation.append(node);
   }
+  dialog.scrollTop = 0;
   dialog.showModal();
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => centerDialogTarget(targetMark || targetMessage));
+  });
 }
 
 searchInput.addEventListener("input", () => {
