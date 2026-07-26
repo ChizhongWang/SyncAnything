@@ -11,6 +11,7 @@ from unittest.mock import patch
 from syncanything.connections import ConnectionStore, syncanything_home
 from syncanything.index import ConversationIndex
 from syncanything.mcp import McpServer
+from syncanything.service import SyncAnythingService
 from syncanything.sources.citeanything import CiteAnythingAdapter
 from syncanything.sources.claude import ClaudeAdapter
 from syncanything.sources.codex import CodexAdapter
@@ -290,6 +291,19 @@ class IndexAndMcpTests(unittest.TestCase):
                 self.assertEqual(index.count_search("记忆不应该绑定", source="claude"), 1)
                 results = index.search("记忆不应该绑定")
                 self.assertEqual(results[0]["id"], "claude:s1")
+                self.assertEqual(results[0]["match_ordinal"], 0)
+
+                assistant_results = index.search("建立跨智能体索引")
+                self.assertEqual(assistant_results[0]["match_ordinal"], 1)
+                focused = SyncAnythingService(index).get_session(
+                    "claude:s1",
+                    max_chars=15,
+                    focus_ordinal=0,
+                    focus_query="用户记忆",
+                )
+                assert focused is not None
+                self.assertEqual([message["ordinal"] for message in focused["messages"]], [0])
+                self.assertIn("用户记忆", focused["messages"][0]["text"])
 
                 server = McpServer(index)
                 initialized = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
