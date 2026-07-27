@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/syncanything/static/logo.svg" width="96" alt="SyncAnything logo" />
+  <img src="https://raw.githubusercontent.com/ChizhongWang/SyncAnything/main/src/syncanything/static/logo.svg" width="96" alt="SyncAnything logo" />
 </p>
 
 <h1 align="center">SyncAnything</h1>
@@ -32,43 +32,61 @@ For a single headless connection, environment variables remain available:
 ```bash
 export SYNCANYTHING_CITEANYTHING_API_KEY="ca_your_context_read_key"
 export CITEANYTHING_BASE_URL="https://citeanything.veri-glow.com"
-./bin/syncanything index
-./bin/syncanything serve --no-index
+syncanything index
+syncanything serve --no-index
 ```
 
 For the China service, use `https://citeanything.cn`. Do not reuse the `CITEANYTHING_API_KEY` used by the CiteAnything skill. SyncAnything keeps a local read-only snapshot under `~/.syncanything/connectors/citeanything/`; CiteAnything remains the source of truth.
 
 ## Quick start
 
+Install SyncAnything as an isolated command-line tool:
+
 ```bash
-git clone https://github.com/ChizhongWang/syncanything.git
-cd syncanything
-./bin/syncanything index
-./bin/syncanything serve
+uv tool install syncanything
+# or: pipx install syncanything
+
+syncanything index
+syncanything serve
 ```
 
 Open `http://127.0.0.1:7331`.
 
-On Windows PowerShell, install the package into a local virtual environment first:
+You can also install it into the active Python environment:
 
-```powershell
-git clone https://github.com/ChizhongWang/syncanything.git
-cd syncanything
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
-.\.venv\Scripts\syncanything.exe index
-.\.venv\Scripts\syncanything.exe serve
+```bash
+python -m pip install syncanything
+python -m syncanything --version
+```
+
+Before the first PyPI release, install the current `main` branch with:
+
+```bash
+uv tool install git+https://github.com/ChizhongWang/SyncAnything.git
 ```
 
 ## CLI
 
 ```bash
-./bin/syncanything index
-./bin/syncanything search "用户记忆被绑定"
-./bin/syncanything search "authentication" --source claude
-./bin/syncanything list --source codex
-./bin/syncanything show claude:SESSION_ID --last 12
-./bin/syncanything reference codex:SESSION_ID
+syncanything index
+syncanything search "用户记忆被绑定"
+syncanything search "authentication" --source claude
+syncanything list --source codex
+syncanything show claude:SESSION_ID --last 12
+syncanything reference codex:SESSION_ID
+```
+
+## Python API
+
+The same index can be embedded in Python:
+
+```python
+from syncanything.index import ConversationIndex, default_db_path
+from syncanything.service import SyncAnythingService
+
+with ConversationIndex(default_db_path()) as index:
+    service = SyncAnythingService(index)
+    results = service.search_sessions("authentication", limit=10)
 ```
 
 Every indexed session has a stable local reference:
@@ -82,7 +100,7 @@ syncanything://session/claude:SESSION_ID
 Start the stdio server with:
 
 ```bash
-/absolute/path/to/syncanything/bin/syncanything mcp
+syncanything mcp
 ```
 
 Example MCP client configuration:
@@ -91,7 +109,7 @@ Example MCP client configuration:
 {
   "mcpServers": {
     "syncanything": {
-      "command": "/absolute/path/to/syncanything/bin/syncanything",
+      "command": "syncanything",
       "args": ["mcp"]
     }
   }
@@ -113,8 +131,8 @@ An agent should search first, then read only the selected session. Retrieved con
 The index defaults to `~/.syncanything/index.db`. Override it with either:
 
 ```bash
-SYNCANYTHING_HOME=/some/private/directory ./bin/syncanything index
-SYNCANYTHING_DB=/some/private/index.db ./bin/syncanything index
+SYNCANYTHING_HOME=/some/private/directory syncanything index
+SYNCANYTHING_DB=/some/private/index.db syncanything index
 ```
 
 The index can be deleted and rebuilt at any time. The coding tools' original files remain the source of truth.
@@ -135,5 +153,21 @@ The index can be deleted and rebuilt at any time. The coding tools' original fil
 ## Development
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+git clone https://github.com/ChizhongWang/SyncAnything.git
+cd SyncAnything
+python -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
+python -m unittest discover -s tests -v
+```
+
+On Windows PowerShell, activate the environment with
+`.\.venv\Scripts\Activate.ps1`.
+
+Build the same artifacts that are uploaded to PyPI:
+
+```bash
+python -m pip install build twine
+python -m build
+python -m twine check dist/*
 ```
