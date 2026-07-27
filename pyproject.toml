@@ -1,20 +1,47 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "syncanything"
-version = "0.1.0"
 description = "An agent-native context index across AI products."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Chizhong Wang" }]
+keywords = [
+    "ai",
+    "claude",
+    "codex",
+    "context",
+    "conversation",
+    "mcp",
+    "search",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Database :: Database Engines/Servers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Indexing",
+]
 dependencies = []
+dynamic = ["version"]
 
 [project.urls]
-Homepage = "https://github.com/ChizhongWang/syncanything"
-Repository = "https://github.com/ChizhongWang/syncanything"
+Homepage = "https://github.com/ChizhongWang/SyncAnything"
+Repository = "https://github.com/ChizhongWang/SyncAnything"
+Issues = "https://github.com/ChizhongWang/SyncAnything/issues"
 
 [project.scripts]
 syncanything = "syncanything.cli:main"
@@ -25,5 +52,13 @@ syncanything = "syncanything.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.dynamic]
+version = { attr = "syncanything.__version__" }
+
 [tool.setuptools.package-data]
-syncanything = ["static/*"]
+syncanything = [
+    "static/*.css",
+    "static/*.html",
+    "static/*.js",
+    "static/*.svg",
+]
