@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 import os
 import platform
+import subprocess
+import sys
 import tempfile
 import unittest
+from importlib.resources import files
 from pathlib import Path
 from unittest.mock import patch
 
+from syncanything import __version__
 from syncanything.connections import ConnectionStore, syncanything_home
 from syncanything.index import ConversationIndex
 from syncanything.mcp import McpServer
@@ -25,6 +29,20 @@ def write_jsonl(path: Path, records: list[dict]) -> None:
 
 
 class AdapterTests(unittest.TestCase):
+    def test_module_entrypoint_reports_package_version(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "-m", "syncanything", "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.strip(), f"syncanything {__version__}")
+
+    def test_web_static_assets_are_packaged(self) -> None:
+        static = files("syncanything.static")
+        for name in ("app.js", "index.html", "logo.svg", "styles.css"):
+            self.assertTrue(static.joinpath(name).is_file(), name)
+
     def test_syncanything_home_uses_env_without_expanding_home(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             with patch.dict(os.environ, {"SYNCANYTHING_HOME": directory}, clear=True):

@@ -5,6 +5,7 @@ import json
 import sys
 from typing import Any
 
+from syncanything import __version__
 from syncanything.index import ConversationIndex, default_db_path
 from syncanything.mcp import run_mcp
 from syncanything.service import SyncAnythingService
@@ -15,6 +16,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="syncanything",
         description="Search and reference local conversations across AI coding tools.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument("--db", help="Override the SQLite index path.")
     subparsers = parser.add_subparsers(dest="command", required=True)
