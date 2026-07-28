@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from syncanything import __version__
@@ -76,11 +78,17 @@ def _print_table(results: list[dict[str, Any]]) -> None:
             print(f"  {clean[:220]}")
 
 
+def _configure_home_from_db(db_path: Path) -> None:
+    if "SYNCANYTHING_HOME" not in os.environ:
+        os.environ["SYNCANYTHING_HOME"] = str(db_path.parent)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    from pathlib import Path
 
     db_path = Path(args.db).expanduser() if args.db else default_db_path()
+    if args.db:
+        _configure_home_from_db(db_path)
     with ConversationIndex(db_path) as index:
         service = SyncAnythingService(index)
         if args.command == "index":
