@@ -17,7 +17,7 @@ Phase 1 is intentionally read-only:
 - indexes visible user and assistant text in SQLite FTS5;
 - searches Chinese and English conversation text;
 - renders a normalized conversation while preserving its original file path;
-- exposes the same operations through a CLI, local web interface, and MCP server.
+- exposes the same operations through a CLI, local web interface, Python API, and MCP server.
 
 System prompts, developer messages, reasoning blocks, tool calls, tool output, images, and binary attachments are not indexed. Original session files are never modified.
 
@@ -25,9 +25,15 @@ System prompts, developer messages, reasoning blocks, tool calls, tool output, i
 
 CiteAnything is identified as its own product even when its current execution runtime is Claude Code. A connected conversation therefore keeps a namespaced ID such as `citeanything:china-account:42`; its underlying Claude Code, Codex CLI, or Grok Build session ID is only runtime metadata.
 
-In the local web interface, choose **连接** and add each CiteAnything site/account you want to search. International and China accounts can be connected at the same time. In CiteAnything, use **Take CiteAnything Home → Connect SyncAnything** to create the dedicated key. On macOS, SyncAnything stores it in Keychain and never writes it to the SQLite index, connection metadata, or repository.
+In the local web interface, choose **连接** and add each CiteAnything site/account you want to search. International and China accounts can be connected at the same time. In CiteAnything, use **Take CiteAnything Home -> Connect SyncAnything** to create the dedicated key.
 
-For a single headless connection, environment variables remain available:
+SyncAnything never writes CiteAnything API keys to the SQLite index, connection metadata, or repository:
+
+- macOS stores keys in Keychain.
+- Windows stores keys with DPAPI in an encrypted per-user file under SyncAnything home.
+- Headless or unsupported platforms can still use environment variables.
+
+For a single headless connection:
 
 ```bash
 export SYNCANYTHING_CITEANYTHING_API_KEY="ca_your_context_read_key"
@@ -40,7 +46,7 @@ For the China service, use `https://citeanything.cn`. Do not reuse the `CITEANYT
 
 ## Quick start
 
-Install SyncAnything as an isolated command-line tool:
+Install SyncAnything from PyPI as an isolated command-line tool:
 
 ```bash
 uv tool install syncanything
@@ -57,12 +63,30 @@ You can also install it into the active Python environment:
 ```bash
 python -m pip install syncanything
 python -m syncanything --version
+python -m syncanything index
+python -m syncanything serve
 ```
 
-Before the first PyPI release, install the current `main` branch with:
+For local development from this repository:
 
 ```bash
-uv tool install git+https://github.com/ChizhongWang/SyncAnything.git
+git clone https://github.com/ChizhongWang/SyncAnything.git
+cd SyncAnything
+python -m venv .venv
+python -m pip install -e .
+python -m syncanything index
+python -m syncanything serve
+```
+
+On Windows PowerShell, use the generated `.exe` entrypoint after creating the virtual environment:
+
+```powershell
+git clone https://github.com/ChizhongWang/SyncAnything.git
+cd SyncAnything
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\.venv\Scripts\syncanything.exe index
+.\.venv\Scripts\syncanything.exe serve
 ```
 
 ## CLI
@@ -74,6 +98,14 @@ syncanything search "authentication" --source claude
 syncanything list --source codex
 syncanything show claude:SESSION_ID --last 12
 syncanything reference codex:SESSION_ID
+syncanything status --json
+```
+
+All commands also work through the module entrypoint:
+
+```bash
+python -m syncanything search "authentication"
+python -m syncanything --version
 ```
 
 ## Python API
@@ -116,6 +148,19 @@ Example MCP client configuration:
 }
 ```
 
+For a non-default local home or database, keep the database and connection metadata together. If `--db` is supplied and `SYNCANYTHING_HOME` is not set, SyncAnything infers the home directory from the database parent:
+
+```json
+{
+  "mcpServers": {
+    "syncanything": {
+      "command": "syncanything",
+      "args": ["--db", "/private/syncanything/index.db", "mcp"]
+    }
+  }
+}
+```
+
 Available tools:
 
 - `search_sessions`
@@ -133,6 +178,7 @@ The index defaults to `~/.syncanything/index.db`. Override it with either:
 ```bash
 SYNCANYTHING_HOME=/some/private/directory syncanything index
 SYNCANYTHING_DB=/some/private/index.db syncanything index
+syncanything --db /some/private/index.db index
 ```
 
 The index can be deleted and rebuilt at any time. The coding tools' original files remain the source of truth.
@@ -171,3 +217,11 @@ python -m pip install build twine
 python -m build
 python -m twine check dist/*
 ```
+
+Publish a release to PyPI:
+
+```bash
+python -m twine upload dist/*
+```
+
+For API token uploads, use `__token__` as the username and the full `pypi-...` token as the password.
