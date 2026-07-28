@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Iterable
 
+from syncanything.connections import syncanything_home
 from syncanything.models import Message, Session
 from syncanything.sources import SourceAdapter, default_adapters
 
@@ -14,8 +15,7 @@ def default_db_path() -> Path:
     explicit = os.environ.get("SYNCANYTHING_DB")
     if explicit:
         return Path(explicit).expanduser()
-    home = Path(os.environ.get("SYNCANYTHING_HOME", Path.home() / ".syncanything"))
-    return home.expanduser() / "index.db"
+    return syncanything_home() / "index.db"
 
 
 def file_fingerprint(path: Path) -> str:
