@@ -48,6 +48,33 @@ class AdapterTests(unittest.TestCase):
             with patch.dict(os.environ, {"SYNCANYTHING_HOME": directory}, clear=True):
                 self.assertEqual(syncanything_home(), Path(directory))
 
+    def test_cli_db_override_can_imply_home(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "index.db"
+            env = {
+                "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+                "PYTHONUTF8": "1",
+                "TEMP": directory,
+                "TMP": directory,
+            }
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "syncanything",
+                    "--db",
+                    str(db_path),
+                    "status",
+                    "--json",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["database"], str(db_path))
+
     def test_citeanything_does_not_reuse_skill_key(self) -> None:
         with patch.dict(
             os.environ,
