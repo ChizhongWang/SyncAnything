@@ -252,6 +252,25 @@ python -m unittest discover -s tests -v
 On Windows PowerShell, activate the environment with
 `.\.venv\Scripts\Activate.ps1`.
 
+### Running the working tree
+
+`bin/syncanything` runs this checkout against `~/.syncanything-dev`, so
+development never writes to the index and connector cache an installed release
+searches. The two can disagree about session id and cache directory naming, and
+pointing both at one home produces duplicate sessions. Set `SYNCANYTHING_HOME`
+to override.
+
+### Releasing
+
+```bash
+git tag v0.3.0 && git push --tags
+```
+
+Tagging runs `.github/workflows/publish.yml`, which refuses to release unless
+the tag matches `syncanything.__version__`, runs the tests, and uploads to PyPI
+through Trusted Publishing. Authentication is a short-lived OIDC token minted
+for that workflow run, so there is no API token to store, rotate, or leak.
+
 Build the same artifacts that are uploaded to PyPI:
 
 ```bash
