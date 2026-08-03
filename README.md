@@ -108,6 +108,29 @@ python -m syncanything search "authentication"
 python -m syncanything --version
 ```
 
+### Staying current
+
+`search`, `list`, `show`, `reference`, and `status` re-scan local session files
+before they answer, so a conversation you finished a moment ago is already
+searchable — there is no separate step to remember. Only changed files are
+reparsed, which keeps the whole scan around 15ms.
+
+Connected remote products such as CiteAnything are deliberately excluded from
+that automatic pass: reaching them costs an HTTP round trip, and no read command
+should block on the network. That sync is incremental too — the conversation list
+carries `updated_at`, so only conversations that actually changed are downloaded,
+and a run with no changes costs one request per connection instead of one per
+conversation. They sync when you ask for it:
+
+```bash
+syncanything index          # local files + connected remote products
+syncanything index --local  # local files only, no network
+syncanything --no-refresh search "..."   # read the index exactly as stored
+```
+
+`serve` syncs everything once at startup, and the web interface's **同步** button
+re-syncs on demand.
+
 ## Python API
 
 The same index can be embedded in Python:

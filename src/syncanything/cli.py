@@ -11,7 +11,10 @@ from syncanything import __version__
 from syncanything.index import ConversationIndex, default_db_path
 from syncanything.mcp import run_mcp
 from syncanything.service import SyncAnythingService
+from syncanything.sources import local_adapters
 from syncanything.web import serve
+
+READ_COMMANDS = frozenset({"search", "list", "show", "reference", "status"})
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,10 +28,20 @@ def build_parser() -> argparse.ArgumentParser:
         version=f"%(prog)s {__version__}",
     )
     parser.add_argument("--db", help="Override the SQLite index path.")
+    parser.add_argument(
+        "--no-refresh",
+        action="store_true",
+        help="Skip the automatic local re-scan that keeps read commands current.",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     index_parser = subparsers.add_parser("index", help="Refresh the local conversation index.")
     index_parser.add_argument("--force", action="store_true", help="Reparse unchanged files.")
+    index_parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Only scan local files; skip connected remote products.",
+    )
     index_parser.add_argument("--json", action="store_true")
 
     search_parser = subparsers.add_parser("search", help="Search indexed sessions.")
@@ -91,19 +104,27 @@ def main(argv: list[str] | None = None) -> int:
         _configure_home_from_db(db_path)
     with ConversationIndex(db_path) as index:
         service = SyncAnythingService(index)
+        # Read commands re-scan local sources first so results always reflect the
+        # conversations on disk right now. Remote products stay on `index`/`serve`.
+        if args.command in READ_COMMANDS and not args.no_refresh:
+            index.refresh()
         if args.command == "index":
-            report = index.index_all(force=args.force)
+            report = index.index_all(
+                adapters=local_adapters() if args.local else None, force=args.force
+            )
             if args.json:
                 print(json.dumps(report, ensure_ascii=False, indent=2))
             else:
                 print(
-                    f"Indexed {report['indexed']}; unchanged {report['skipped']}; "
-                    f"removed {report['removed']}; errors {len(report['errors'])}"
+                    f"Indexed {report['indexed']}; unchanged {report['unchanged']}; "
+                    f"empty {report['empty']}; removed {report['removed']}; "
+                    f"errors {len(report['errors'])}"
                 )
                 for source, state in report["sources"].items():
                     print(
                         f"  {source}: found {state['discovered']}, indexed {state['indexed']}, "
-                        f"unchanged {state['skipped']}, errors {state['errors']}"
+                        f"unchanged {state['unchanged']}, empty {state['empty']}, "
+                        f"errors {state['errors']}"
                     )
                     if state.get("sync_error"):
                         print(f"    connection warning: {state['sync_error']}")
