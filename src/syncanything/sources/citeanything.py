@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.error import HTTPError, URLError
@@ -16,6 +18,27 @@ from syncanything.sources.base import SourceAdapter, choose_title, is_conversati
 
 #: The conversations endpoint rejects anything above 100 (Query(le=100)).
 PAGE_SIZE = 100
+
+UNSAFE_PATH_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def parse_instant(value: Any) -> datetime | None:
+    """Read a server timestamp as a point in time.
+
+    Comparing the raw strings would treat "…+00:00" and "…Z" as different
+    timestamps, so a change in how the server renders the same instant would
+    invalidate every cached conversation at once.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 class CiteAnythingAdapter(SourceAdapter):
@@ -51,6 +74,7 @@ class CiteAnythingAdapter(SourceAdapter):
         self.fetched_details = 0
         self.skipped_unchanged = 0
         self.pruned = 0
+        self.adopted = 0
 
     def discover(self) -> Iterable[Path]:
         for connection, secret in self.connections:
@@ -100,9 +124,120 @@ class CiteAnythingAdapter(SourceAdapter):
             base_url.rstrip("/"), api_key.strip(), "/api/conversations?limit=1&offset=0"
         )
 
-    def _prune_cache(self, connection_id: str, live_ids: set[str]) -> None:
-        """Remove cached snapshots for conversations no longer on the server."""
-        cache = self._connection_cache(connection_id)
+    @staticmethod
+    def account_namespace(base_url: str, account_uid: str) -> str:
+        """Identify whose history this is, independently of the local connection.
+
+        Connection ids embed a uuid4, so they change every time an account is
+        removed and re-added. Deriving identity from the site and the account's
+        server-assigned uid instead keeps cache directories and session ids
+        stable across reconnects, and keeps two accounts on one site apart.
+        """
+        site = CiteAnythingAdapter._connection_slug(base_url)
+        return f"{site}-{account_uid}" if account_uid else site
+
+    @property
+    def _account_map_path(self) -> Path:
+        return self.cache_root / "accounts.json"
+
+    def _read_account_map(self) -> dict[str, str]:
+        try:
+            payload = json.loads(self._account_map_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _remember_account(self, connection_id: str, account_uid: str) -> None:
+        mapping = self._read_account_map()
+        if mapping.get(connection_id) == account_uid:
+            return
+        mapping[connection_id] = account_uid
+        self.cache_root.mkdir(parents=True, exist_ok=True)
+        self._account_map_path.write_text(
+            json.dumps(mapping, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _resolve_cache(self, connection: CiteAnythingConnection, account_uid: str) -> Path:
+        """Locate this account's cache directory.
+
+        The account a connection points at is remembered, so a server that stops
+        reporting one — an older deployment, or a rollback — still resolves to the
+        same directory. Falling back to a different location would split the cache
+        and re-download the whole history on every switch between server versions.
+        """
+        if account_uid:
+            self._remember_account(connection.id, account_uid)
+        else:
+            account_uid = self._read_account_map().get(connection.id, "")
+        if not account_uid:
+            return self._connection_cache(connection.id)
+        namespace = self.account_namespace(connection.base_url, account_uid)
+        return self.cache_root / UNSAFE_PATH_CHARS.sub("-", namespace)
+
+    def _adopt_legacy_cache(self, target: Path, base_url: str, account_uid: str) -> None:
+        """Claim a pre-identity cache directory for this account.
+
+        Older snapshots live in a directory named after the connection id. Moving
+        them here keeps a reconnect from re-downloading the whole history, and
+        stamping the uid in gives those conversations their stable session ids.
+
+        Only an unambiguous match is claimed: with two accounts on one site there
+        is no way to tell whose directory it is, and guessing would file one
+        account's conversations under another's identity.
+        """
+        if target.exists() or not self.cache_root.exists() or not account_uid:
+            return
+        candidates = []
+        for directory in sorted(self.cache_root.iterdir()):
+            if not directory.is_dir() or directory == target:
+                continue
+            snapshots = sorted(directory.glob("conversation-*.json"))
+            if not snapshots:
+                continue
+            try:
+                payload = json.loads(snapshots[0].read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("_syncanything_account_uid"):
+                continue  # already owned by some account
+            if str(payload.get("_syncanything_base_url") or "") == base_url:
+                candidates.append(directory)
+        if len(candidates) != 1:
+            return
+        candidates[0].rename(target)
+        self.adopted = sum(1 for _ in target.glob("conversation-*.json"))
+        for path in target.glob("conversation-*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    continue
+                payload["_syncanything_account_uid"] = account_uid
+                path.write_text(
+                    json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            except (OSError, json.JSONDecodeError):
+                continue
+
+    def _forget(self, cache: Path, conversation_id: str) -> None:
+        """Drop a cached snapshot for a conversation deleted upstream."""
+        path = cache / f"conversation-{conversation_id}.json"
+        if path.exists():
+            try:
+                path.unlink()
+                self.pruned += 1
+            except OSError:
+                pass
+
+    def _prune_cache(self, cache: Path, live_ids: set[str]) -> None:
+        """Remove cached snapshots the server no longer lists at all.
+
+        Tombstones handle deletions going forward; this catches conversations
+        that were already gone before the server started recording them.
+        """
         if not cache.exists():
             return
         for path in cache.glob("conversation-*.json"):
@@ -114,37 +249,49 @@ class CiteAnythingAdapter(SourceAdapter):
                 except OSError:
                     continue
 
-    def _cached_updated_at(self, connection_id: str) -> dict[str, str]:
-        """Map conversation id -> updated_at for everything already cached locally."""
-        cache = self._connection_cache(connection_id)
+    def _cached_instants(self, cache: Path) -> dict[str, datetime | None]:
+        """Map conversation id -> last-known update time for cached snapshots."""
         if not cache.exists():
             return {}
-        cached: dict[str, str] = {}
+        cached: dict[str, datetime | None] = {}
         for path in cache.glob("conversation-*.json"):
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
             if isinstance(payload, dict) and payload.get("id") is not None:
-                cached[str(payload["id"])] = str(payload.get("updated_at") or "")
+                cached[str(payload["id"])] = parse_instant(payload.get("updated_at"))
         return cached
 
     def _sync_remote(self, connection: CiteAnythingConnection, api_key: str) -> None:
         self.sync_error = None
         try:
-            cached = self._cached_updated_at(connection.id)
+            cache: Path | None = None
+            account_uid = ""
+            cached: dict[str, datetime | None] = {}
             offset = 0
             seen: set[str] = set()
             reported_total: int | None = None
             while True:
                 seen_before = len(seen)
-                query = urlencode({"limit": PAGE_SIZE, "offset": offset})
+                query = urlencode(
+                    {"limit": PAGE_SIZE, "offset": offset, "include_deleted": "true"}
+                )
                 payload = self._request_json(
                     connection.base_url, api_key, f"/api/conversations?{query}"
                 )
                 conversations = payload.get("conversations", []) if isinstance(payload, dict) else []
                 if not isinstance(conversations, list) or not conversations:
                     break
+
+                if cache is None:
+                    # Which account this is only becomes known from the response,
+                    # so the cache location is resolved once the first page lands.
+                    account = payload.get("account") if isinstance(payload, dict) else None
+                    account_uid = str((account or {}).get("uid") or "")
+                    cache = self._resolve_cache(connection, account_uid)
+                    self._adopt_legacy_cache(cache, connection.base_url, account_uid)
+                    cached = self._cached_instants(cache)
 
                 pending: dict[Any, tuple[str, dict[str, Any]]] = {}
                 for summary in conversations:
@@ -154,12 +301,17 @@ class CiteAnythingAdapter(SourceAdapter):
                     if conversation_id in seen:
                         continue
                     seen.add(conversation_id)
+                    if summary.get("deleted"):
+                        # An explicit tombstone: the conversation is gone, and we
+                        # know it without having to enumerate everything first.
+                        self._forget(cache, conversation_id)
+                        continue
                     # The summary already carries updated_at, so an unchanged
                     # conversation needs no detail request at all.
-                    remote_updated = str(summary.get("updated_at") or "")
+                    remote_updated = parse_instant(summary.get("updated_at"))
                     if (
                         conversation_id in cached
-                        and remote_updated
+                        and remote_updated is not None
                         and cached[conversation_id] == remote_updated
                     ):
                         self.skipped_unchanged += 1
@@ -204,10 +356,11 @@ class CiteAnythingAdapter(SourceAdapter):
                             **summary,
                             **detail,
                             "_syncanything_base_url": connection.base_url,
+                            "_syncanything_account_uid": account_uid,
                             "_syncanything_connection_id": connection.id,
                             "_syncanything_connection_name": connection.name,
                         }
-                        self._write_snapshot(connection.id, conversation_id, snapshot)
+                        self._write_snapshot(cache, conversation_id, snapshot)
                         self.fetched_details += 1
 
                 if isinstance(payload, dict) and isinstance(payload.get("total"), int):
@@ -225,8 +378,8 @@ class CiteAnythingAdapter(SourceAdapter):
             # reported a total we can confirm we enumerated completely. Older
             # servers omit it, and pruning against a partial list would delete
             # cached conversations that still exist.
-            if reported_total is not None and len(seen) >= reported_total:
-                self._prune_cache(connection.id, seen)
+            if cache is not None and reported_total is not None and len(seen) >= reported_total:
+                self._prune_cache(cache, seen)
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError) as error:
             message = f"{type(error).__name__}: {error}"
             self.sync_errors.append({"connection_id": connection.id, "error": message})
@@ -245,9 +398,8 @@ class CiteAnythingAdapter(SourceAdapter):
             return json.loads(response.read().decode("utf-8"))
 
     def _write_snapshot(
-        self, connection_id: str, conversation_id: str, snapshot: dict[str, Any]
+        self, cache: Path, conversation_id: str, snapshot: dict[str, Any]
     ) -> None:
-        cache = self._connection_cache(connection_id)
         cache.mkdir(parents=True, exist_ok=True)
         path = cache / f"conversation-{conversation_id}.json"
         encoded = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
@@ -297,9 +449,17 @@ class CiteAnythingAdapter(SourceAdapter):
                 messages.insert(0, Message(role="user", text=title))
         conversation_id = str(payload["id"])
         base_url = str(payload.get("_syncanything_base_url") or self.base_url).rstrip("/")
-        connection_id = str(
-            payload.get("_syncanything_connection_id") or self._connection_slug(base_url)
-        )
+        # The session id is a durable public reference, so it is namespaced by the
+        # account rather than the connection: connection ids embed a uuid4 and
+        # change whenever an account is re-added. Snapshots taken before the
+        # server exposed an account uid keep their original namespace.
+        account_uid = str(payload.get("_syncanything_account_uid") or "")
+        if account_uid:
+            connection_id = self.account_namespace(base_url, account_uid)
+        else:
+            connection_id = str(
+                payload.get("_syncanything_connection_id") or self._connection_slug(base_url)
+            )
         connection_name = str(
             payload.get("_syncanything_connection_name") or connection_id
         )

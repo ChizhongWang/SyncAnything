@@ -120,7 +120,8 @@ that automatic pass: reaching them costs an HTTP round trip, and no read command
 should block on the network. That sync is incremental too — the conversation list
 carries `updated_at`, so only conversations that actually changed are downloaded,
 and a run with no changes costs one request per connection instead of one per
-conversation. They sync when you ask for it:
+conversation. Conversations deleted upstream arrive as explicit tombstones and
+are dropped locally. They sync when you ask for it:
 
 ```bash
 syncanything index          # local files + connected remote products
@@ -205,6 +206,24 @@ syncanything --db /some/private/index.db index
 ```
 
 The index can be deleted and rebuilt at any time. The coding tools' original files remain the source of truth.
+
+### Session references
+
+A session id is a durable reference — the point of `syncanything reference` is to
+hand another agent something that still resolves later. Ids for connected products
+are therefore namespaced by *account*, not by the local connection:
+
+```
+citeanything:china-u_T9XBarGzXq6Rz4Wn:110
+            └── site ──┘└── account ─┘└ conversation
+```
+
+The account identifier comes from the server and outlives the local connection,
+so removing and re-adding an account leaves both the reference and the cached
+history intact, and two accounts on one site stay distinct. Cached conversations
+from before a server exposed an account identifier keep their original namespace
+until that account is connected again, at which point they are adopted in place
+rather than re-downloaded.
 
 ## Source support
 
