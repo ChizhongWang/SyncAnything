@@ -378,8 +378,10 @@ class IndexAndMcpTests(unittest.TestCase):
 class _FakeCiteAnythingServer:
     """Minimal stand-in for the CiteAnything conversations API."""
 
-    def __init__(self, legacy: bool = False) -> None:
+    def __init__(self, legacy: bool = False, account_uid: str = "u_acct1") -> None:
         self.conversations: dict[str, dict] = {}
+        self.deleted: dict[str, str] = {}  # id -> deleted_at
+        self.account_uid = account_uid
         self.legacy = legacy  # emulate a server predating limit/offset/total
         self.list_hits = 0
         self.detail_hits = 0
@@ -394,14 +396,24 @@ class _FakeCiteAnythingServer:
                 query = parse_qs(parsed.query)
                 if parsed.path == "/api/conversations":
                     outer.list_hits += 1
-                    ordered = sorted(
-                        outer.conversations.values(),
-                        key=lambda c: c["updated_at"],
-                        reverse=True,
-                    )
-                    summaries = [
-                        {k: v for k, v in c.items() if k != "events"} for c in ordered
+                    include_deleted = query.get("include_deleted", ["false"])[0] == "true"
+                    entries = [
+                        {k: v for k, v in c.items() if k != "events"}
+                        for c in outer.conversations.values()
                     ]
+                    if include_deleted:
+                        entries += [
+                            {
+                                "id": int(cid),
+                                "deleted": True,
+                                "updated_at": when,
+                                "deleted_at": when,
+                            }
+                            for cid, when in outer.deleted.items()
+                        ]
+                    summaries = sorted(
+                        entries, key=lambda c: c["updated_at"], reverse=True
+                    )
                     if outer.legacy:
                         body = {"conversations": summaries[:50]}
                     else:
@@ -415,6 +427,7 @@ class _FakeCiteAnythingServer:
                         offset = int(query.get("offset", ["0"])[0])
                         body = {
                             "conversations": summaries[offset : offset + limit],
+                            "account": {"uid": outer.account_uid},
                             "total": len(summaries),
                             "limit": limit,
                             "offset": offset,
@@ -439,12 +452,17 @@ class _FakeCiteAnythingServer:
             "id": number,
             "title": f"会话 {number}",
             "session_id": f"s{number}",
-            "created_at": "2026-08-01T00:00:00+00:00",
+            "created_at": "2026-08-01T00:00:00Z",
             "updated_at": updated_at,
             "events": [
                 {"type": "user", "message": {"role": "user", "content": f"内容 {number}"}}
             ],
         }
+
+    def delete(self, number: int, deleted_at: str = "2026-09-01T00:00:00Z") -> None:
+        """Delete a conversation the way the server does: content gone, tombstone kept."""
+        self.conversations.pop(str(number), None)
+        self.deleted[str(number)] = deleted_at
 
     def reset_counters(self) -> None:
         self.list_hits = 0
@@ -464,7 +482,13 @@ class CiteAnythingIncrementalSyncTests(unittest.TestCase):
             id="test", name="Test", base_url=self.server.base_url
         )
         for number in range(60):
-            self.server.add(number, f"2026-08-01T00:{number:02d}:00+00:00")
+            self.server.add(number, f"2026-08-01T00:{number:02d}:00Z")
+
+    def _namespace(self) -> str:
+        """The account-derived cache/session namespace for the fake server."""
+        return CiteAnythingAdapter.account_namespace(
+            self.server.base_url, self.server.account_uid
+        )
 
     def _sync(self) -> tuple[CiteAnythingAdapter, int]:
         adapter = CiteAnythingAdapter(
@@ -487,7 +511,7 @@ class CiteAnythingIncrementalSyncTests(unittest.TestCase):
 
     def test_only_modified_conversations_are_refetched(self) -> None:
         self._sync()
-        self.server.conversations["7"]["updated_at"] = "2026-08-02T09:00:00+00:00"
+        self.server.conversations["7"]["updated_at"] = "2026-08-02T09:00:00Z"
         self.server.reset_counters()
         adapter, _ = self._sync()
         self.assertEqual(self.server.detail_hits, 1)
@@ -502,11 +526,124 @@ class CiteAnythingIncrementalSyncTests(unittest.TestCase):
 
     def test_pagination_reaches_beyond_one_page(self) -> None:
         for number in range(60, 260):
-            self.server.add(number, f"2026-08-03T{(number // 60):02d}:{number % 60:02d}:00+00:00")
+            self.server.add(number, f"2026-08-03T{(number // 60):02d}:{number % 60:02d}:00Z")
         self.server.reset_counters()
         _, cached = self._sync()
         self.assertEqual(cached, 260)
         self.assertGreater(self.server.list_hits, 1)
+
+    def test_tombstone_removes_the_cached_conversation(self) -> None:
+        _, cached = self._sync()
+        self.assertEqual(cached, 60)
+
+        self.server.delete(9)
+        self.server.reset_counters()
+        adapter, cached = self._sync()
+        self.assertEqual(cached, 59)
+        self.assertEqual(adapter.pruned, 1)
+        self.assertEqual(self.server.detail_hits, 0)  # a tombstone needs no fetch
+
+    def test_tombstone_is_honoured_without_full_enumeration(self) -> None:
+        # Absence-based pruning needs the whole history; an explicit tombstone
+        # does not, which is the point of recording deletions server-side.
+        self._sync()
+        self.server.delete(9)
+        self.server.legacy = True  # no total, so the absence prune cannot run
+        adapter, cached = self._sync()
+        self.assertEqual(cached, 59)
+        self.assertEqual(adapter.pruned, 1)
+
+    def test_timestamp_format_change_does_not_refetch(self) -> None:
+        self._sync()
+        # The server switches from "+00:00" to "Z" for the very same instants.
+        for conversation in self.server.conversations.values():
+            conversation["updated_at"] = conversation["updated_at"].replace("Z", "+00:00")
+        self.server.reset_counters()
+        adapter, _ = self._sync()
+        self.assertEqual(self.server.detail_hits, 0)
+        self.assertEqual(adapter.skipped_unchanged, 60)
+
+    def test_cache_is_keyed_by_account_not_connection(self) -> None:
+        self._sync()
+        expected = self.cache / self._namespace()
+        self.assertTrue(expected.is_dir())
+        self.assertEqual(len(list(expected.glob("conversation-*.json"))), 60)
+
+        # Re-adding the account mints a new connection id; the cache must persist.
+        reconnected = CiteAnythingConnection(
+            id="test-a-different-uuid", name="Test", base_url=self.server.base_url
+        )
+        adapter = CiteAnythingAdapter(
+            cache_root=self.cache, connections=[(reconnected, "key")]
+        )
+        self.server.reset_counters()
+        list(adapter.discover())
+        self.assertEqual(self.server.detail_hits, 0)
+        self.assertEqual(adapter.skipped_unchanged, 60)
+
+    def test_session_ids_survive_a_reconnect(self) -> None:
+        self._sync()
+        snapshot = next((self.cache / self._namespace()).glob("conversation-*.json"))
+        adapter = CiteAnythingAdapter(cache_root=self.cache, connections=[])
+        session = adapter.parse(snapshot)
+        assert session is not None
+        # Namespaced by account, so nothing about it depends on the connection.
+        self.assertTrue(session.id.startswith(f"citeanything:{self._namespace()}:"))
+        self.assertNotIn("test", session.id)
+
+    def test_legacy_cache_directory_is_adopted(self) -> None:
+        # A directory written before the server exposed an account uid.
+        legacy = self.cache / "0123456789ab"
+        legacy.mkdir(parents=True)
+        (legacy / "conversation-1.json").write_text(
+            json.dumps(
+                {
+                    "id": 1,
+                    "title": "旧的会话",
+                    "updated_at": "2026-08-01T00:01:00Z",
+                    "_syncanything_base_url": self.server.base_url,
+                    "_syncanything_connection_id": "test-old-uuid",
+                    "events": [
+                        {"type": "user", "message": {"role": "user", "content": "内容 1"}}
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        self.server.reset_counters()
+        adapter, _ = self._sync()
+
+        self.assertFalse(legacy.exists())
+        adopted = self.cache / self._namespace()
+        self.assertTrue((adopted / "conversation-1.json").exists())
+        self.assertEqual(adapter.adopted, 1)
+        # Adopted, not re-downloaded: conversation 1 was already current.
+        self.assertEqual(self.server.detail_hits, 59)
+
+        payload = json.loads((adopted / "conversation-1.json").read_text(encoding="utf-8"))
+        self.assertEqual(payload["_syncanything_account_uid"], "u_acct1")
+
+    def test_ambiguous_legacy_directories_are_left_alone(self) -> None:
+        # Two accounts on one site: guessing would file one under the other.
+        for name in ("aaaaaaaaaaaa", "bbbbbbbbbbbb"):
+            directory = self.cache / name
+            directory.mkdir(parents=True)
+            (directory / "conversation-1.json").write_text(
+                json.dumps(
+                    {
+                        "id": 1,
+                        "updated_at": "2026-08-01T00:01:00Z",
+                        "_syncanything_base_url": self.server.base_url,
+                        "events": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+        adapter, _ = self._sync()
+        self.assertEqual(adapter.adopted, 0)
+        self.assertTrue((self.cache / "aaaaaaaaaaaa").exists())
+        self.assertTrue((self.cache / "bbbbbbbbbbbb").exists())
 
     def test_legacy_server_neither_loops_nor_prunes(self) -> None:
         self._sync()
