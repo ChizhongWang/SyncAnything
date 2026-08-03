@@ -1,3 +1,22 @@
 #!/bin/sh
+# Run SyncAnything from this working tree.
+#
+# The released build owns ~/.syncanything. This script points at a separate home
+# so development never writes to the index and connector cache you search every
+# day: the two versions disagree about session id and cache directory naming, and
+# alternating between them against one home produces duplicate sessions.
+#
+# Set SYNCANYTHING_HOME yourself to override, including back to the default.
 PROJECT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+if [ -z "$SYNCANYTHING_HOME" ]; then
+    SYNCANYTHING_HOME="$HOME/.syncanything-dev"
+    export SYNCANYTHING_HOME
+    # Only announce it interactively, so --json output stays machine-readable.
+    if [ -t 2 ]; then
+        printf 'syncanything (dev tree) using SYNCANYTHING_HOME=%s\n' \
+            "$SYNCANYTHING_HOME" >&2
+    fi
+fi
+
 PYTHONPATH="$PROJECT_DIR/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m syncanything.cli "$@"
