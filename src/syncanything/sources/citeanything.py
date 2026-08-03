@@ -14,11 +14,15 @@ from syncanything.connections import CiteAnythingConnection, ConnectionStore, sy
 from syncanything.models import Message, Session
 from syncanything.sources.base import SourceAdapter, choose_title, is_conversation_text, visible_text
 
+#: The conversations endpoint rejects anything above 100 (Query(le=100)).
+PAGE_SIZE = 100
+
 
 class CiteAnythingAdapter(SourceAdapter):
     """Read CiteAnything as a product-level source, independent of its agent runtime."""
 
     name = "citeanything"
+    is_remote = True
 
     def __init__(
         self,
@@ -44,6 +48,9 @@ class CiteAnythingAdapter(SourceAdapter):
             self.connections = self._configured_connections()
         self.sync_error: str | None = None
         self.sync_errors: list[dict[str, str]] = []
+        self.fetched_details = 0
+        self.skipped_unchanged = 0
+        self.pruned = 0
 
     def discover(self) -> Iterable[Path]:
         for connection, secret in self.connections:
@@ -93,13 +100,45 @@ class CiteAnythingAdapter(SourceAdapter):
             base_url.rstrip("/"), api_key.strip(), "/api/conversations?limit=1&offset=0"
         )
 
+    def _prune_cache(self, connection_id: str, live_ids: set[str]) -> None:
+        """Remove cached snapshots for conversations no longer on the server."""
+        cache = self._connection_cache(connection_id)
+        if not cache.exists():
+            return
+        for path in cache.glob("conversation-*.json"):
+            conversation_id = path.stem.split("conversation-", 1)[-1]
+            if conversation_id not in live_ids:
+                try:
+                    path.unlink()
+                    self.pruned += 1
+                except OSError:
+                    continue
+
+    def _cached_updated_at(self, connection_id: str) -> dict[str, str]:
+        """Map conversation id -> updated_at for everything already cached locally."""
+        cache = self._connection_cache(connection_id)
+        if not cache.exists():
+            return {}
+        cached: dict[str, str] = {}
+        for path in cache.glob("conversation-*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict) and payload.get("id") is not None:
+                cached[str(payload["id"])] = str(payload.get("updated_at") or "")
+        return cached
+
     def _sync_remote(self, connection: CiteAnythingConnection, api_key: str) -> None:
         self.sync_error = None
         try:
+            cached = self._cached_updated_at(connection.id)
             offset = 0
             seen: set[str] = set()
+            reported_total: int | None = None
             while True:
-                query = urlencode({"limit": 100, "offset": offset})
+                seen_before = len(seen)
+                query = urlencode({"limit": PAGE_SIZE, "offset": offset})
                 payload = self._request_json(
                     connection.base_url, api_key, f"/api/conversations?{query}"
                 )
@@ -115,6 +154,16 @@ class CiteAnythingAdapter(SourceAdapter):
                     if conversation_id in seen:
                         continue
                     seen.add(conversation_id)
+                    # The summary already carries updated_at, so an unchanged
+                    # conversation needs no detail request at all.
+                    remote_updated = str(summary.get("updated_at") or "")
+                    if (
+                        conversation_id in cached
+                        and remote_updated
+                        and cached[conversation_id] == remote_updated
+                    ):
+                        self.skipped_unchanged += 1
+                        continue
                     pending[conversation_id] = (conversation_id, summary)
 
                 with ThreadPoolExecutor(max_workers=6) as executor:
@@ -159,11 +208,25 @@ class CiteAnythingAdapter(SourceAdapter):
                             "_syncanything_connection_name": connection.name,
                         }
                         self._write_snapshot(connection.id, conversation_id, snapshot)
+                        self.fetched_details += 1
 
-                new_count = len(pending)
-                if new_count == 0 or len(conversations) < 100:
+                if isinstance(payload, dict) and isinstance(payload.get("total"), int):
+                    reported_total = payload["total"]
+
+                # A page of entirely unchanged conversations is normal now, so
+                # only stop when the page added nothing new to enumerate — which
+                # is also what protects us from a server that ignores `offset`.
+                page_new = len(seen) - seen_before
+                if page_new == 0 or len(conversations) < PAGE_SIZE:
                     break
-                offset += new_count
+                offset += len(conversations)
+
+            # Drop conversations deleted upstream, but only when the server
+            # reported a total we can confirm we enumerated completely. Older
+            # servers omit it, and pruning against a partial list would delete
+            # cached conversations that still exist.
+            if reported_total is not None and len(seen) >= reported_total:
+                self._prune_cache(connection.id, seen)
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError) as error:
             message = f"{type(error).__name__}: {error}"
             self.sync_errors.append({"connection_id": connection.id, "error": message})

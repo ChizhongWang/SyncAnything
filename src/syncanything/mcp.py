@@ -135,7 +135,15 @@ class McpServer:
         except Exception as error:  # Keep the stdio server alive for independent calls.
             return self._error(request_id, -32603, str(error))
 
+    #: Tools that read the index; each re-scans local sources first so a long-lived
+    #: stdio server never serves results from a stale snapshot.
+    READ_TOOLS = frozenset(
+        {"search_sessions", "list_sessions", "get_session", "get_session_reference"}
+    )
+
     def _call_tool(self, name: str | None, arguments: dict[str, Any]) -> dict[str, Any]:
+        if name in self.READ_TOOLS:
+            self.index.refresh()
         if name == "search_sessions":
             value = self.service.search_sessions(
                 query=str(arguments.get("query", "")),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -20,9 +21,23 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
     sync_lock = threading.Lock()
     sync_state: dict[str, object] = {"running": False, "report": None, "error": None}
 
+    def _refresh_local(self) -> None:
+        """Re-scan local sources before serving a read.
+
+        Skipped while a full sync runs: that background thread owns its own
+        connection, and a second writer would contend for the database.
+        """
+        if self.sync_state.get("running"):
+            return
+        try:
+            self.index.refresh()
+        except sqlite3.Error:
+            pass  # A stale answer beats failing the request.
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/status":
+            self._refresh_local()
             self._json(self.index.stats())
             return
         if parsed.path == "/api/connections":
@@ -32,6 +47,7 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
             self._json(dict(self.sync_state))
             return
         if parsed.path == "/api/sessions":
+            self._refresh_local()
             query = parse_qs(parsed.query)
             phrase = query.get("q", [""])[0]
             source = query.get("source", [None])[0] or None

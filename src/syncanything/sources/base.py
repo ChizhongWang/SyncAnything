@@ -95,6 +95,9 @@ def iso_from_mtime(path: Path) -> str:
 
 class SourceAdapter(ABC):
     name: str
+    #: Remote adapters reach the network in discover(); read commands skip them
+    #: so that search and list never block on an HTTP round trip.
+    is_remote: bool = False
 
     @abstractmethod
     def discover(self) -> Iterable[Path]:
