@@ -1,0 +1,53 @@
+name: Publish
+
+# Releasing is `git tag vX.Y.Z && git push --tags`. PyPI authenticates this
+# workflow through OIDC (Trusted Publishing), so no API token exists to leak.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Check the tag matches the packaged version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          packaged=$(python -c "import sys; sys.path.insert(0, 'src'); import syncanything; print(syncanything.__version__)")
+          if [ "$tag" != "$packaged" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match __version__ $packaged" >&2
+            exit 1
+          fi
+          echo "Releasing $packaged"
+
+      - name: Run tests
+        run: PYTHONPATH=src python -m unittest discover -s tests
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    # The environment is what the PyPI publisher is bound to, and where a
+    # required reviewer can be added later to gate releases.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/syncanything
+    permissions:
+      # Mints the short-lived OIDC token PyPI verifies. Nothing is stored.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
