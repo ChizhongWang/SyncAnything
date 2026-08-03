@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
 from syncanything.connections import syncanything_home
 from syncanything.models import Message, Session
-from syncanything.sources import SourceAdapter, default_adapters
+from syncanything.sources import SourceAdapter, default_adapters, local_adapters
 
 
 def default_db_path() -> Path:
@@ -24,7 +25,14 @@ def file_fingerprint(path: Path) -> str:
 
 
 class ConversationIndex:
-    def __init__(self, db_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        adapters: Iterable[SourceAdapter] | None = None,
+    ) -> None:
+        # The index owns the source set it represents, so refresh() re-scans exactly
+        # those sources instead of assuming the default home directories.
+        self.adapters: list[SourceAdapter] | None = list(adapters) if adapters is not None else None
         self.db_path = db_path or default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(self.db_path)
@@ -77,9 +85,51 @@ class ConversationIndex:
                 text,
                 tokenize='trigram'
             );
+
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
             """
         )
         self.connection.commit()
+
+    def _get_meta(self, key: str) -> str | None:
+        row = self.connection.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def _set_meta(self, key: str, value: str) -> None:
+        self.connection.execute(
+            "INSERT INTO meta(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        self.connection.commit()
+
+    def last_refresh(self, scope: str) -> float:
+        raw = self._get_meta(f"last_refresh:{scope}")
+        try:
+            return float(raw) if raw else 0.0
+        except ValueError:
+            return 0.0
+
+    def refresh(self, max_age_seconds: float = 2.0, force: bool = False) -> dict[str, Any] | None:
+        """Incrementally re-index local sources before a read.
+
+        Scanning every local session file costs about 15ms, so this runs inline on
+        search, list, show, reference, and status. Remote sources are excluded: their
+        discover() performs HTTP requests and belongs to explicit `index` or `serve`.
+        Returns None when a recent refresh made this call unnecessary.
+        """
+        if not force and (time.time() - self.last_refresh("local")) < max_age_seconds:
+            return None
+        sources = self.adapters if self.adapters is not None else local_adapters()
+        local = [adapter for adapter in sources if not adapter.is_remote]
+        if not local:
+            return None
+        report = self.index_all(adapters=local)
+        self._set_meta("last_refresh:local", str(time.time()))
+        return report
 
     def index_all(
         self,
@@ -89,14 +139,23 @@ class ConversationIndex:
         report: dict[str, Any] = {
             "database": str(self.db_path),
             "indexed": 0,
+            "unchanged": 0,
+            "empty": 0,
             "skipped": 0,
             "removed": 0,
             "errors": [],
             "sources": {},
         }
-        for adapter in adapters or default_adapters():
+        for adapter in adapters or self.adapters or default_adapters():
             discovered = list(adapter.discover())
-            source_report = {"discovered": len(discovered), "indexed": 0, "skipped": 0, "errors": 0}
+            source_report = {
+                "discovered": len(discovered),
+                "indexed": 0,
+                "unchanged": 0,
+                "empty": 0,
+                "skipped": 0,
+                "errors": 0,
+            }
             sync_error = getattr(adapter, "sync_error", None)
             if sync_error:
                 source_report["sync_error"] = sync_error
@@ -108,13 +167,18 @@ class ConversationIndex:
                         "SELECT fingerprint FROM sessions WHERE source_path = ?", (str(path),)
                     ).fetchone()
                     if existing and existing["fingerprint"] == fingerprint and not force:
+                        report["unchanged"] += 1
                         report["skipped"] += 1
+                        source_report["unchanged"] += 1
                         source_report["skipped"] += 1
                         continue
                     session = adapter.parse(path)
                     if session is None:
+                        # Parsed to nothing visible (e.g. a tool-only transcript).
                         report["removed"] += self._delete_path(str(path))
+                        report["empty"] += 1
                         report["skipped"] += 1
+                        source_report["empty"] += 1
                         source_report["skipped"] += 1
                         continue
                     self.put_session(session, fingerprint)
