@@ -114,14 +114,17 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
         self._json({"removed": removed}, HTTPStatus.OK if removed else HTTPStatus.NOT_FOUND)
 
     def _add_citeanything_connection(self) -> None:
+        # Failures carry a stable `code` so the browser can render them in the
+        # reader's language; `error` stays as an English fallback for API clients.
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0 or length > 32_768:
-                raise ValueError("请求内容无效")
+                raise ValueError("Invalid request body")
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             site = str(payload.get("site") or "custom")
             base_url = str(payload.get("base_url") or SITE_URLS.get(site, "")).rstrip("/")
-            name = str(payload.get("name") or ("CiteAnything 中国站" if site == "china" else "CiteAnything 国际站"))
+            default_name = "CiteAnything China" if site == "china" else "CiteAnything International"
+            name = str(payload.get("name") or default_name)
             api_key = str(payload.get("api_key") or "").strip()
             CiteAnythingAdapter(connections=[]).validate(base_url, api_key)
             connection = ConnectionStore().add_citeanything(name, base_url, api_key, site)
@@ -135,13 +138,27 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
             )
         except HTTPError as error:
             self._json(
-                {"error": f"CiteAnything 拒绝了该密钥（HTTP {error.code}）"},
+                {
+                    "code": "key_rejected",
+                    "status": error.code,
+                    "error": f"CiteAnything rejected the key (HTTP {error.code})",
+                },
                 HTTPStatus.UNAUTHORIZED,
             )
         except (URLError, TimeoutError, OSError) as error:
-            self._json({"error": f"无法连接 CiteAnything：{error}"}, HTTPStatus.BAD_GATEWAY)
+            self._json(
+                {
+                    "code": "unreachable",
+                    "detail": str(error),
+                    "error": f"Could not reach CiteAnything: {error}",
+                },
+                HTTPStatus.BAD_GATEWAY,
+            )
         except (ValueError, RuntimeError, json.JSONDecodeError) as error:
-            self._json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            self._json(
+                {"code": "invalid_request", "detail": str(error), "error": str(error)},
+                HTTPStatus.BAD_REQUEST,
+            )
 
     def _begin_reindex(self) -> bool:
         if not self.sync_lock.acquire(blocking=False):

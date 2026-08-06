@@ -82,6 +82,17 @@ h1 span { color: var(--green); }
 .filter { border: 1px solid var(--line); border-radius: 999px; padding: 8px 13px; background: transparent; color: var(--muted); }
 .filter:hover, .filter.active { color: var(--green-dark); background: var(--green-soft); border-color: #bce9d7; }
 
+/* Keep the label from reflowing the toolbar when it toggles between EN and 中文. */
+#language-toggle { min-width: 54px; text-align: center; }
+
+.stats-section { margin-bottom: 46px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.stat-card { display: grid; gap: 6px; align-content: start; padding: 16px 18px; background: rgba(255,255,255,.86); border: 1px solid var(--line); border-radius: 14px; }
+.stat-label { color: var(--muted); font-size: 12px; font-weight: 650; }
+.stat-value { font-size: 25px; font-weight: 680; line-height: 1.15; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.stat-detail { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.stat-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+
 .section-heading { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
 .section-heading h2 { font-size: 20px; margin: 0; letter-spacing: -.02em; }
 .section-heading span { color: var(--muted); font-size: 13px; }
@@ -147,9 +158,12 @@ dialog::backdrop { background: rgba(20, 35, 29, .38); backdrop-filter: blur(4px)
 @media (max-width: 680px) {
   .topbar { padding: 0 4vw; gap: 10px; }
   .brand small, .status, .search-box kbd { display: none; }
-  .quiet-button { margin-left: auto; }
+  /* Only the first button takes the free space; the rest sit beside it. */
+  #language-toggle { margin-left: auto; }
   .hero { padding-top: 54px; }
   h1 { font-size: 43px; }
+  .stat-grid { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
+  .stat-value { font-size: 21px; }
   .card-foot .cwd { max-width: 58vw; }
   .dialog-actions { align-items: flex-start; flex-direction: column; }
 }
