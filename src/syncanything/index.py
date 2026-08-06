@@ -160,22 +160,40 @@ class ConversationIndex:
         except ValueError:
             return 0.0
 
-    def refresh(self, max_age_seconds: float = 2.0, force: bool = False) -> dict[str, Any] | None:
-        """Incrementally re-index local sources before a read.
+    #: Remote sources are synced at most once per this interval during reads.
+    REMOTE_SYNC_INTERVAL: float = float(os.environ.get("SYNCANYTHING_REMOTE_SYNC_INTERVAL", "300"))
 
-        Scanning every local session file costs about 15ms, so this runs inline on
-        search, list, show, reference, and status. Remote sources are excluded: their
-        discover() performs HTTP requests and belongs to explicit `index` or `serve`.
-        Returns None when a recent refresh made this call unnecessary.
+    def refresh(self, max_age_seconds: float = 2.0, force: bool = False) -> dict[str, Any] | None:
+        """Incrementally re-index sources before a read.
+
+        Local sources are scanned on every call (throttled to *max_age_seconds*).
+        Remote sources (CiteAnything) are synced when their last pull is older
+        than ``REMOTE_SYNC_INTERVAL`` (default 5 min, env-configurable).
         """
-        if not force and (time.time() - self.last_refresh("local")) < max_age_seconds:
-            return None
-        sources = self.adapters if self.adapters is not None else local_adapters()
-        local = [adapter for adapter in sources if not adapter.is_remote]
-        if not local:
-            return None
-        report = self.index_all(adapters=local)
-        self._set_meta("last_refresh:local", str(time.time()))
+        now = time.time()
+        report: dict[str, Any] | None = None
+
+        if force or (now - self.last_refresh("local")) >= max_age_seconds:
+            sources = self.adapters if self.adapters is not None else local_adapters()
+            local = [adapter for adapter in sources if not adapter.is_remote]
+            if local:
+                report = self.index_all(adapters=local)
+                self._set_meta("last_refresh:local", str(now))
+
+        if force or (now - self.last_refresh("remote")) >= self.REMOTE_SYNC_INTERVAL:
+            all_sources = self.adapters if self.adapters is not None else default_adapters()
+            remote = [adapter for adapter in all_sources if adapter.is_remote]
+            if remote:
+                remote_report = self.index_all(adapters=remote)
+                self._set_meta("last_refresh:remote", str(now))
+                if report is None:
+                    report = remote_report
+                else:
+                    for key in ("indexed", "unchanged", "empty", "skipped", "removed"):
+                        report[key] += remote_report.get(key, 0)
+                    report["errors"].extend(remote_report.get("errors", []))
+                    report["sources"].update(remote_report.get("sources", {}))
+
         return report
 
     def index_all(
