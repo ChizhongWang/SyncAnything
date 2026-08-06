@@ -17,6 +17,8 @@ Phase 1 is intentionally read-only:
 - indexes visible user and assistant text in SQLite FTS5;
 - searches Chinese and English conversation text;
 - renders a normalized conversation while preserving its original file path;
+- reports how much conversation is stored locally, in characters, words, estimated tokens, and disk footprint;
+- presents the web interface in Simplified Chinese or English;
 - exposes the same operations through a CLI, local web interface, Python API, and MCP server.
 
 System prompts, developer messages, reasoning blocks, tool calls, tool output, images, and binary attachments are not indexed. Original session files are never modified.
@@ -57,6 +59,32 @@ syncanything serve
 ```
 
 Open `http://127.0.0.1:7331`.
+
+The interface opens in Simplified Chinese or English depending on your browser, and
+the toolbar button switches between them; the choice is remembered in that browser.
+
+## What is stored locally
+
+The home page and `syncanything status` both report the size of the indexed corpus:
+
+```bash
+syncanything status
+```
+
+```
+295 sessions · 9902 messages · /Users/you/.syncanything/index.db
+  3,869,580 characters · 1,360,403 words · ~1,360,621 tokens (estimated)
+  6.3 MB of text · 85.2 MB on disk
+  about 2.32 x War and Peace
+```
+
+Characters exclude whitespace, so indentation in pasted code does not inflate the
+count. CJK characters each count as one word; Latin text counts by word. The token
+figure is estimated at 1.5 CJK characters and 4 Latin characters per token rather
+than measured with a tokeniser, and the book comparison uses the commonly
+cited length of each work, so both are a sense of scale rather than a measurement.
+The trigram full-text index is several times the size of the text it covers, which
+is why the disk figure is much larger than the text figure.
 
 You can also install it into the active Python environment:
 

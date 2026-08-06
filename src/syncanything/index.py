@@ -8,8 +8,13 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from syncanything.connections import syncanything_home
+from syncanything.metrics import TextMetrics, book_equivalents, measure
 from syncanything.models import Message, Session
 from syncanything.sources import SourceAdapter, default_adapters, local_adapters
+
+# Denormalised onto `sessions` so status reads stay a single aggregate query
+# instead of re-measuring every message.
+TEXT_METRIC_COLUMNS = ("char_count", "word_count", "token_estimate", "text_bytes")
 
 
 def default_db_path() -> Path:
@@ -63,6 +68,10 @@ class ConversationIndex:
                 updated_at TEXT,
                 source_path TEXT NOT NULL UNIQUE,
                 message_count INTEGER NOT NULL,
+                char_count INTEGER NOT NULL DEFAULT 0,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                token_estimate INTEGER NOT NULL DEFAULT 0,
+                text_bytes INTEGER NOT NULL DEFAULT 0,
                 fingerprint TEXT NOT NULL,
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -93,6 +102,44 @@ class ConversationIndex:
             """
         )
         self.connection.commit()
+        self._add_text_metric_columns()
+
+    def _add_text_metric_columns(self) -> None:
+        """Bring an index built before text metrics existed up to date.
+
+        The columns are added empty and backfilled from the messages already
+        indexed, so an existing database gains the numbers without a reindex.
+        """
+        existing = {
+            row["name"] for row in self.connection.execute("PRAGMA table_info(sessions)")
+        }
+        missing = [column for column in TEXT_METRIC_COLUMNS if column not in existing]
+        if not missing:
+            return
+        with self.connection:
+            for column in missing:
+                self.connection.execute(
+                    f"ALTER TABLE sessions ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+                )
+        self._backfill_text_metrics()
+
+    def _backfill_text_metrics(self) -> None:
+        totals: dict[str, TextMetrics] = {}
+        cursor = self.connection.execute("SELECT session_id, text FROM messages")
+        for row in cursor:
+            session_id = row["session_id"]
+            totals[session_id] = totals.get(session_id, TextMetrics()) + measure(row["text"])
+        if not totals:
+            return
+        with self.connection:
+            self.connection.executemany(
+                "UPDATE sessions SET char_count = ?, word_count = ?, "
+                "token_estimate = ?, text_bytes = ? WHERE id = ?",
+                [
+                    (metrics.characters, metrics.words, metrics.tokens, metrics.bytes, session_id)
+                    for session_id, metrics in totals.items()
+                ],
+            )
 
     def _get_meta(self, key: str) -> str | None:
         row = self.connection.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
@@ -197,6 +244,9 @@ class ConversationIndex:
         return report
 
     def put_session(self, session: Session, fingerprint: str) -> None:
+        metrics = TextMetrics()
+        for message in session.messages:
+            metrics = metrics + measure(message.text)
         with self.connection:
             old = self.connection.execute(
                 "SELECT id FROM sessions WHERE source_path = ?", (str(session.path),)
@@ -207,8 +257,9 @@ class ConversationIndex:
                 """
                 INSERT INTO sessions (
                     id, source, native_id, title, cwd, started_at, updated_at,
-                    source_path, message_count, fingerprint, metadata_json, indexed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    source_path, message_count, char_count, word_count, token_estimate,
+                    text_bytes, fingerprint, metadata_json, indexed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     title=excluded.title,
                     cwd=excluded.cwd,
@@ -216,6 +267,10 @@ class ConversationIndex:
                     updated_at=excluded.updated_at,
                     source_path=excluded.source_path,
                     message_count=excluded.message_count,
+                    char_count=excluded.char_count,
+                    word_count=excluded.word_count,
+                    token_estimate=excluded.token_estimate,
+                    text_bytes=excluded.text_bytes,
                     fingerprint=excluded.fingerprint,
                     metadata_json=excluded.metadata_json,
                     indexed_at=CURRENT_TIMESTAMP
@@ -230,6 +285,10 @@ class ConversationIndex:
                     session.updated_at,
                     str(session.path),
                     len(session.messages),
+                    metrics.characters,
+                    metrics.words,
+                    metrics.tokens,
+                    metrics.bytes,
                     fingerprint,
                     json.dumps(session.metadata, ensure_ascii=False),
                 ),
@@ -469,13 +528,46 @@ class ConversationIndex:
         session["messages"] = [dict(message) for message in messages]
         return session
 
+    def storage_bytes(self) -> int:
+        """Disk footprint of the index, including the write-ahead log.
+
+        The trigram FTS index is several times the size of the text it covers,
+        so this is materially larger than the `text_bytes` it is built from.
+        """
+        total = 0
+        for suffix in ("", "-wal", "-shm"):
+            candidate = self.db_path.with_name(self.db_path.name + suffix)
+            try:
+                total += candidate.stat().st_size
+            except OSError:
+                continue
+        return total
+
     def stats(self) -> dict[str, Any]:
         rows = self.connection.execute(
-            "SELECT source, COUNT(*) AS sessions, SUM(message_count) AS messages FROM sessions GROUP BY source"
+            """
+            SELECT source,
+                   COUNT(*) AS sessions,
+                   SUM(message_count) AS messages,
+                   SUM(char_count) AS characters,
+                   SUM(word_count) AS words,
+                   SUM(token_estimate) AS tokens,
+                   SUM(text_bytes) AS text_bytes
+            FROM sessions GROUP BY source
+            """
         ).fetchall()
+        sources = [
+            {key: (value or 0) if key != "source" else value for key, value in dict(row).items()}
+            for row in rows
+        ]
+        totals = {
+            key: sum(source[key] for source in sources)
+            for key in ("sessions", "messages", "characters", "words", "tokens", "text_bytes")
+        }
         return {
             "database": str(self.db_path),
-            "sources": [dict(row) for row in rows],
-            "sessions": sum(row["sessions"] for row in rows),
-            "messages": sum(row["messages"] or 0 for row in rows),
+            "sources": sources,
+            **totals,
+            "storage_bytes": self.storage_bytes(),
+            "books": book_equivalents(totals["characters"], totals["words"]),
         }

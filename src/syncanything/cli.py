@@ -81,6 +81,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _human_bytes(value: int) -> str:
+    size = float(value)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
 def _print_table(results: list[dict[str, Any]]) -> None:
     for result in results:
         updated = (result.get("updated_at") or "")[:19].replace("T", " ")
@@ -172,8 +181,21 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(stats, ensure_ascii=False, indent=2))
             else:
                 print(f"{stats['sessions']} sessions · {stats['messages']} messages · {stats['database']}")
+                print(
+                    f"  {stats['characters']:,} characters · {stats['words']:,} words · "
+                    f"~{stats['tokens']:,} tokens (estimated)"
+                )
+                print(
+                    f"  {_human_bytes(stats['text_bytes'])} of text · "
+                    f"{_human_bytes(stats['storage_bytes'])} on disk"
+                )
+                book = stats["books"]["en"][0]
+                print(f"  about {book['equivalent']:g} x {book['title']}")
                 for source in stats["sources"]:
-                    print(f"  {source['source']}: {source['sessions']} sessions, {source['messages']} messages")
+                    print(
+                        f"  {source['source']}: {source['sessions']} sessions, "
+                        f"{source['messages']} messages, {source['characters']:,} characters"
+                    )
             return 0
         if args.command == "serve":
             if not args.no_index:
