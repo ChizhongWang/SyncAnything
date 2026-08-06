@@ -46,6 +46,8 @@ button { cursor: pointer; }
 .brand small { color: var(--muted); font-weight: 500; margin-left: -4px; }
 .status { margin-left: auto; color: var(--muted); font-size: 13px; }
 
+/* A label that breaks across lines makes the toolbar taller than the bar. */
+.quiet-button { white-space: nowrap; }
 .quiet-button, .icon-button {
   border: 1px solid var(--line);
   background: rgba(255,255,255,.8);
@@ -86,22 +88,29 @@ h1 span { color: var(--green); }
 #language-toggle { min-width: 54px; text-align: center; }
 
 .stats-section { margin-bottom: 46px; }
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+/* Six fixed cards lay out evenly as 3x2; auto-fit would strand one on its own
+   row at common widths. The tracks stay wide enough that a grouped figure never
+   has to break between digits. */
+.stat-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .stat-card { display: grid; gap: 6px; align-content: start; padding: 16px 18px; background: rgba(255,255,255,.86); border: 1px solid var(--line); border-radius: 14px; }
 .stat-label { color: var(--muted); font-size: 12px; font-weight: 650; }
-.stat-value { font-size: 25px; font-weight: 680; line-height: 1.15; letter-spacing: -.035em; overflow-wrap: anywhere; }
+.stat-value { font-size: 23px; font-weight: 680; line-height: 1.15; letter-spacing: -.035em; }
 .stat-detail { color: var(--muted); font-size: 11px; line-height: 1.5; }
 .stat-note { margin: 14px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
 
 .section-heading { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
 .section-heading h2 { font-size: 20px; margin: 0; letter-spacing: -.02em; }
 .section-heading span { color: var(--muted); font-size: 13px; }
-.results { display: grid; gap: 12px; }
+/* minmax(0, …) lets a card narrower than its own content shrink instead of
+   widening the track, which a long source path or English date would do. */
+.results { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 .result-card { padding: 20px 22px; background: rgba(255,255,255,.86); border: 1px solid var(--line); border-radius: 15px; transition: transform .18s, border-color .18s, box-shadow .18s; outline: none; }
 .result-card:hover, .result-card:focus { transform: translateY(-2px); border-color: #a9dbc8; box-shadow: 0 12px 36px rgba(31,55,45,.07); }
-.card-meta { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+.card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; color: var(--muted); font-size: 12px; }
 .source-badge { display: inline-flex; align-items: center; border-radius: 5px; padding: 4px 7px; color: var(--green-dark); background: var(--green-soft); font-size: 11px; font-weight: 720; text-transform: uppercase; letter-spacing: .05em; }
-.result-card h3 { margin: 12px 0 8px; font-size: 18px; letter-spacing: -.015em; }
+/* A pasted URL in a title has no break opportunity and would otherwise set the
+   card's minimum width, pushing the whole page into horizontal scroll. */
+.result-card h3 { margin: 12px 0 8px; font-size: 18px; letter-spacing: -.015em; overflow-wrap: anywhere; }
 .snippet { margin: 0; color: #55625c; line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 mark { background: #c9f5df; color: inherit; border-radius: 2px; }
 .card-foot { display: flex; align-items: center; margin-top: 14px; gap: 12px; color: var(--muted); font-size: 12px; }
@@ -159,11 +168,16 @@ dialog::backdrop { background: rgba(20, 35, 29, .38); backdrop-filter: blur(4px)
   .topbar { padding: 0 4vw; gap: 10px; }
   .brand small, .status, .search-box kbd { display: none; }
   /* Only the first button takes the free space; the rest sit beside it. */
-  #language-toggle { margin-left: auto; }
+  #language-toggle { margin-left: auto; min-width: 0; }
+  /* Three buttons plus the wordmark do not fit 390px at full size. */
+  .brand span { font-size: 15px; }
+  .quiet-button { padding: 7px 9px; font-size: 12px; }
   .hero { padding-top: 54px; }
   h1 { font-size: 43px; }
-  .stat-grid { grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); }
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stat-value { font-size: 21px; }
+  /* Let the count drop below a heading that has wrapped rather than crowd it. */
+  .section-heading { flex-wrap: wrap; gap: 2px 12px; }
   .card-foot .cwd { max-width: 58vw; }
   .dialog-actions { align-items: flex-start; flex-direction: column; }
 }
