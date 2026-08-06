@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,7 @@ from syncanything.connections import (
 )
 from syncanything.index import ConversationIndex
 from syncanything.mcp import McpServer
+from syncanything.metrics import TextMetrics, book_equivalents, measure
 from syncanything.service import SyncAnythingService
 from syncanything.sources.citeanything import CiteAnythingAdapter
 from syncanything.sources.claude import ClaudeAdapter
@@ -753,6 +756,201 @@ class RefreshTests(unittest.TestCase):
                 self.assertEqual(second["unchanged"], 1)
                 self.assertEqual(second["empty"], 1)
                 self.assertEqual(second["skipped"], 2)
+
+
+class TextMetricsTests(unittest.TestCase):
+    def test_cjk_counts_one_word_per_character_and_latin_by_word(self) -> None:
+        metrics = measure("你好世界 hello wide world")
+        self.assertEqual(metrics.characters, 18)  # whitespace excluded
+        self.assertEqual(metrics.words, 7)  # 4 ideographs + 3 Latin words
+        self.assertEqual(metrics.bytes, len("你好世界 hello wide world".encode("utf-8")))
+
+    def test_indentation_does_not_inflate_the_word_count(self) -> None:
+        dense = measure("def f():\nreturn 1")
+        indented = measure("    def f():\n        return 1")
+        self.assertEqual(dense.characters, indented.characters)
+        self.assertEqual(dense.words, indented.words)
+        # Bytes stay honest about what is actually stored.
+        self.assertGreater(indented.bytes, dense.bytes)
+
+    def test_empty_text_measures_to_zero(self) -> None:
+        self.assertEqual(measure(""), TextMetrics())
+
+    def test_metrics_add_componentwise(self) -> None:
+        self.assertEqual(
+            measure("你好") + measure("world"),
+            measure("你好") + measure("world"),
+        )
+        combined = measure("你好") + measure("world")
+        self.assertEqual(combined.words, measure("你好").words + measure("world").words)
+
+    def test_book_equivalents_compare_like_units(self) -> None:
+        books = book_equivalents(characters=1_460_000, words=1_174_574)
+        chinese = {book["title"]: book for book in books["zh"]}
+        english = {book["title"]: book for book in books["en"]}
+        # 1,460,000 characters is exactly two copies of the 730,000-character 红楼梦.
+        self.assertEqual(chinese["红楼梦"]["unit"], "characters")
+        self.assertEqual(chinese["红楼梦"]["equivalent"], 2.0)
+        # 1,174,574 words is exactly two copies of War and Peace.
+        self.assertEqual(english["War and Peace"]["unit"], "words")
+        self.assertEqual(english["War and Peace"]["equivalent"], 2.0)
+
+
+class StatsTests(unittest.TestCase):
+    def _index_one_session(self, root: Path, text: str) -> ConversationIndex:
+        sessions = root / "sessions"
+        sessions.mkdir(exist_ok=True)
+        write_jsonl(
+            sessions / "s1.jsonl",
+            [{"type": "user", "sessionId": "s1", "message": {"role": "user", "content": text}}],
+        )
+        index = ConversationIndex(root / "index.db", adapters=[ClaudeAdapter(sessions)])
+        index.index_all()
+        return index
+
+    def test_stats_report_text_size_and_book_equivalents(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            text = "这是一次关于斑马鱼实验的讨论 with some English too"
+            with self._index_one_session(root, text) as index:
+                stats = index.stats()
+                expected = measure(text)
+                self.assertEqual(stats["sessions"], 1)
+                self.assertEqual(stats["characters"], expected.characters)
+                self.assertEqual(stats["words"], expected.words)
+                self.assertEqual(stats["tokens"], expected.tokens)
+                self.assertEqual(stats["text_bytes"], expected.bytes)
+                # The SQLite file and its write-ahead log are larger than the text.
+                self.assertGreater(stats["storage_bytes"], stats["text_bytes"])
+                self.assertIn("红楼梦", [book["title"] for book in stats["books"]["zh"]])
+                self.assertIn("War and Peace", [book["title"] for book in stats["books"]["en"]])
+
+    def test_per_source_rows_carry_text_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self._index_one_session(root, "斑马鱼实验的原始讨论") as index:
+                (row,) = index.stats()["sources"]
+                self.assertEqual(row["source"], "claude")
+                self.assertEqual(row["sessions"], 1)
+                self.assertGreater(row["characters"], 0)
+                self.assertGreater(row["tokens"], 0)
+
+    def test_reindexing_a_changed_session_replaces_rather_than_adds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sessions = root / "sessions"
+            sessions.mkdir()
+            path = sessions / "s1.jsonl"
+            write_jsonl(
+                path,
+                [{"type": "user", "sessionId": "s1", "message": {"role": "user", "content": "短"}}],
+            )
+            with ConversationIndex(root / "index.db", adapters=[ClaudeAdapter(sessions)]) as index:
+                index.index_all()
+                first = index.stats()["characters"]
+                write_jsonl(
+                    path,
+                    [
+                        {
+                            "type": "user",
+                            "sessionId": "s1",
+                            "message": {"role": "user", "content": "短" * 40},
+                        }
+                    ],
+                )
+                index.index_all()
+                self.assertEqual(index.stats()["characters"], 40)
+                self.assertNotEqual(index.stats()["characters"], first)
+
+    def test_index_without_metric_columns_is_migrated_and_backfilled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "legacy.db"
+            legacy = sqlite3.connect(db_path)
+            legacy.executescript(
+                """
+                CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY, source TEXT NOT NULL, native_id TEXT NOT NULL,
+                    title TEXT NOT NULL, cwd TEXT, started_at TEXT, updated_at TEXT,
+                    source_path TEXT NOT NULL UNIQUE, message_count INTEGER NOT NULL,
+                    fingerprint TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}',
+                    indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE messages (
+                    session_id TEXT NOT NULL, ordinal INTEGER NOT NULL, role TEXT NOT NULL,
+                    timestamp TEXT, text TEXT NOT NULL, PRIMARY KEY(session_id, ordinal)
+                );
+                """
+            )
+            legacy.execute(
+                "INSERT INTO sessions VALUES ('claude:s1','claude','s1','Legacy',NULL,NULL,NULL,"
+                "'/tmp/s1.jsonl',1,'fp','{}',CURRENT_TIMESTAMP)"
+            )
+            legacy.execute(
+                "INSERT INTO messages VALUES ('claude:s1',0,'user',NULL,'斑马鱼实验的原始讨论')"
+            )
+            legacy.commit()
+            legacy.close()
+
+            # Opening the index must add the columns and fill them from the
+            # messages already stored, with no reindex of the source files.
+            with ConversationIndex(db_path, adapters=[]) as index:
+                stats = index.stats()
+                expected = measure("斑马鱼实验的原始讨论")
+                self.assertEqual(stats["characters"], expected.characters)
+                self.assertEqual(stats["tokens"], expected.tokens)
+
+
+class InterfaceTranslationTests(unittest.TestCase):
+    """The web interface ships two languages; neither may drift from the other."""
+
+    LANGUAGE_HEADER = re.compile(r'^  "?([\w-]+)"?: \{$')
+    ENTRY = re.compile(r'^    "([\w.]+)":')
+
+    def _tables(self) -> dict[str, set[str]]:
+        source = files("syncanything.static").joinpath("app.js").read_text(encoding="utf-8")
+        body = source.split("const translations = {", 1)[1].split("\n};", 1)[0]
+        tables: dict[str, set[str]] = {}
+        current: str | None = None
+        for line in body.splitlines():
+            header = self.LANGUAGE_HEADER.match(line)
+            if header:
+                current = header.group(1)
+                tables[current] = set()
+                continue
+            entry = self.ENTRY.match(line)
+            if entry and current:
+                tables[current].add(entry.group(1))
+        return tables
+
+    def test_both_languages_define_the_same_keys(self) -> None:
+        tables = self._tables()
+        self.assertEqual(set(tables), {"zh-Hans", "en"})
+        self.assertEqual(
+            tables["zh-Hans"],
+            tables["en"],
+            "translation keys drifted between zh-Hans and en",
+        )
+
+    def test_every_markup_binding_has_a_translation(self) -> None:
+        markup = files("syncanything.static").joinpath("index.html").read_text(encoding="utf-8")
+        keys = set(
+            re.findall(
+                r'data-i18n(?:-html|-placeholder|-aria-label)?="([\w.]+)"',
+                markup,
+            )
+        )
+        self.assertTrue(keys, "index.html declares no translated strings")
+        for language, table in self._tables().items():
+            self.assertEqual(set(), keys - table, f"{language} is missing markup keys")
+
+    def test_literal_lookups_in_script_have_translations(self) -> None:
+        source = files("syncanything.static").joinpath("app.js").read_text(encoding="utf-8")
+        # Template-literal keys such as t(`error.${code}`) are resolved with a
+        # fallback at runtime, so only literal lookups are checked here. The
+        # lookbehind keeps calls like createElement("div") out of the match.
+        keys = set(re.findall(r'(?<![\w$.])t\("([\w.]+)"', source))
+        for language, table in self._tables().items():
+            self.assertEqual(set(), keys - table, f"{language} is missing script keys")
 
 
 if __name__ == "__main__":

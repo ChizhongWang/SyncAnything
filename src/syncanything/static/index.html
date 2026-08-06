@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-Hans">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -9,30 +9,31 @@
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/" aria-label="SyncAnything home">
+      <a class="brand" href="/" data-i18n-aria-label="brand.home">
         <img src="/logo.svg" alt="" />
         <span>SyncAnything</span>
         <small>by VeriGlow</small>
       </a>
-      <div class="status" id="status">正在读取本地索引…</div>
-      <button class="quiet-button" id="connections-button">连接</button>
-      <button class="quiet-button" id="reindex">刷新索引</button>
+      <div class="status" id="status" data-i18n="status.loading">正在读取本地索引…</div>
+      <button class="quiet-button" id="language-toggle" data-i18n-aria-label="language.switch">EN</button>
+      <button class="quiet-button" id="connections-button" data-i18n="action.connect">连接</button>
+      <button class="quiet-button" id="reindex" data-i18n="action.reindex">刷新索引</button>
     </header>
 
     <main>
       <section class="hero">
         <p class="eyebrow">ONE INDEX · EVERY AGENT</p>
-        <h1>找到那次对话，<br /><span>指给任何智能体。</span></h1>
-        <p class="intro">统一检索 Claude Code、Codex、Kimi Code、Pi 和 CiteAnything 的宝贵上下文。</p>
+        <h1 data-i18n-html="hero.title">找到那次对话，<br /><span>指给任何智能体。</span></h1>
+        <p class="intro" data-i18n="hero.intro">统一检索 Claude Code、Codex、Kimi Code、Pi 和 CiteAnything 的宝贵上下文。</p>
 
         <label class="search-box">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m21 21-4.35-4.35m2.35-5.65a8 8 0 1 1-16 0 8 8 0 0 1 16 0Z" /></svg>
-          <input id="search" type="search" autocomplete="off" placeholder="搜索决定、问题、项目或原话…" autofocus />
+          <input id="search" type="search" autocomplete="off" data-i18n-placeholder="search.placeholder" placeholder="搜索决定、问题、项目或原话…" autofocus />
           <kbd>⌘ K</kbd>
         </label>
 
-        <nav class="filters" aria-label="Filter by source">
-          <button class="filter active" data-source="">全部</button>
+        <nav class="filters" data-i18n-aria-label="filters.label">
+          <button class="filter active" data-source="" data-i18n="filter.all">全部</button>
           <button class="filter" data-source="claude">Claude Code</button>
           <button class="filter" data-source="codex">Codex</button>
           <button class="filter" data-source="kimi">Kimi Code</button>
@@ -41,9 +42,18 @@
         </nav>
       </section>
 
+      <section class="stats-section" id="stats-section" hidden>
+        <div class="section-heading">
+          <h2 data-i18n="stats.title">本地存储</h2>
+          <span data-i18n="stats.subtitle">全部数据只存在这台机器上</span>
+        </div>
+        <div class="stat-grid" id="stat-grid"></div>
+        <p class="stat-note" id="stat-note"></p>
+      </section>
+
       <section class="results-section">
         <div class="section-heading">
-          <h2 id="result-title">最近的会话</h2>
+          <h2 id="result-title" data-i18n="results.recent">最近的会话</h2>
           <span id="result-count"></span>
         </div>
         <div id="results" class="results" aria-live="polite"></div>
@@ -54,38 +64,39 @@
       <div class="dialog-head">
         <div>
           <span class="source-badge">CiteAnything</span>
-          <h2>连接账号</h2>
+          <h2 data-i18n="connections.title">连接账号</h2>
         </div>
-        <button class="icon-button" id="close-connections" aria-label="Close">×</button>
+        <button class="icon-button" id="close-connections" data-i18n-aria-label="action.close">×</button>
       </div>
       <div class="connections-content">
-        <p class="connection-help">每个站点和账号授权一次。密钥保存在本机系统安全存储中，不会进入会话索引。</p>
+        <p class="connection-help" data-i18n="connections.help">每个站点和账号授权一次。密钥保存在本机系统安全存储中，不会进入会话索引。</p>
         <div id="connections-list" class="connections-list"></div>
         <form id="connection-form">
           <label>
-            站点
+            <span data-i18n="connections.site">站点</span>
             <select id="connection-site">
-              <option value="china">中国站 · citeanything.cn</option>
-              <option value="international">国际站 · citeanything.veri-glow.com</option>
-              <option value="custom">自定义</option>
+              <option value="china" data-i18n="connections.site.china">中国站 · citeanything.cn</option>
+              <option value="international" data-i18n="connections.site.international">国际站 · citeanything.veri-glow.com</option>
+              <option value="custom" data-i18n="connections.site.custom">自定义</option>
             </select>
           </label>
           <label>
-            连接名称
-            <input id="connection-name" value="CiteAnything 中国站" required />
+            <span data-i18n="connections.name">连接名称</span>
+            <!-- Filled by syncConnectionName() so the default follows the language. -->
+            <input id="connection-name" required />
           </label>
           <label id="base-url-label" hidden>
-            站点地址
+            <span data-i18n="connections.base_url">站点地址</span>
             <input id="connection-base-url" type="url" placeholder="https://…" />
           </label>
           <label>
-            SyncAnything API key
+            <span data-i18n="connections.key">SyncAnything API key</span>
             <input id="connection-key" type="password" autocomplete="off" required />
           </label>
-          <p class="form-hint">请在对应 CiteAnything 站点点击“Connect SyncAnything”生成专用密钥。</p>
+          <p class="form-hint" data-i18n="connections.hint">请在对应 CiteAnything 站点点击“Connect SyncAnything”生成专用密钥。</p>
           <div class="connection-form-actions">
             <span id="connection-message"></span>
-            <button class="primary-button" type="submit">验证并连接</button>
+            <button class="primary-button" type="submit" data-i18n="connections.submit">验证并连接</button>
           </div>
         </form>
       </div>
@@ -97,10 +108,10 @@
           <span class="source-badge" id="dialog-source"></span>
           <h2 id="dialog-title"></h2>
         </div>
-        <button class="icon-button" id="close-dialog" aria-label="Close">×</button>
+        <button class="icon-button" id="close-dialog" data-i18n-aria-label="action.close">×</button>
       </div>
       <div class="dialog-actions">
-        <button class="primary-button" id="copy-reference">复制给智能体的引用</button>
+        <button class="primary-button" id="copy-reference" data-i18n="action.copy_reference">复制给智能体的引用</button>
         <code id="dialog-id"></code>
       </div>
       <div class="conversation" id="conversation"></div>
@@ -117,8 +128,16 @@
         <p class="snippet"></p>
         <div class="card-foot">
           <code class="cwd"></code>
-          <span class="open-label">读取会话 →</span>
+          <span class="open-label" data-i18n="results.open">读取会话 →</span>
         </div>
+      </article>
+    </template>
+
+    <template id="stat-template">
+      <article class="stat-card">
+        <span class="stat-label"></span>
+        <strong class="stat-value"></strong>
+        <small class="stat-detail"></small>
       </article>
     </template>
 
