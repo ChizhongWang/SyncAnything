@@ -696,7 +696,7 @@ class RefreshTests(unittest.TestCase):
                 self.assertIsNone(index.refresh(max_age_seconds=600))
                 self.assertIsNotNone(index.refresh(max_age_seconds=0))
 
-    def test_refresh_skips_remote_adapters_and_keeps_their_sessions(self) -> None:
+    def test_refresh_syncs_remote_adapters_with_throttle(self) -> None:
         class StubRemote(CodexAdapter):
             name = "citeanything"
             is_remote = True
@@ -731,11 +731,14 @@ class RefreshTests(unittest.TestCase):
                 self.assertEqual(len(index.search("远程产品里的会话")), 1)
                 calls_after_full_index = remote.discover_calls
 
+                # force=True always syncs remote adapters.
                 index.refresh(force=True)
-                # The remote source is never contacted by a read-path refresh...
-                self.assertEqual(remote.discover_calls, calls_after_full_index)
-                # ...and its already-indexed sessions survive the local prune.
+                self.assertEqual(remote.discover_calls, calls_after_full_index + 1)
                 self.assertEqual(len(index.search("远程产品里的会话")), 1)
+
+                # A non-forced refresh within the interval skips the remote sync.
+                index.refresh(force=False)
+                self.assertEqual(remote.discover_calls, calls_after_full_index + 1)
 
     def test_index_report_separates_unchanged_from_empty(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
