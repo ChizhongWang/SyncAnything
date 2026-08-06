@@ -1,0 +1,30 @@
+name: Test
+
+# Runs on every push and pull request. The release workflow re-runs the same
+# suite before publishing, so a tag can never ship code this job rejected.
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor requires-python declares, and the newest version classified.
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run tests
+        run: PYTHONPATH=src python -m unittest discover -s tests
