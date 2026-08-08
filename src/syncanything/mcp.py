@@ -19,7 +19,7 @@ TOOLS = [
                 "query": {"type": "string", "description": "Exact text or phrase to find."},
                 "source": {
                     "type": "string",
-                    "description": "Optional source filter: claude, codex, kimi, pi, or citeanything.",
+                    "description": "Optional source filter: claude, codex, cursor, kimi, pi, or citeanything.",
                 },
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
             },

@@ -173,7 +173,7 @@ const dialog = document.querySelector("#session-dialog");
 const connectionsDialog = document.querySelector("#connections-dialog");
 let searchTimer;
 
-const sourceNames = { claude: "Claude Code", codex: "Codex", kimi: "Kimi Code", pi: "Pi", citeanything: "CiteAnything" };
+const sourceNames = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", kimi: "Kimi Code", pi: "Pi", citeanything: "CiteAnything" };
 
 function t(key, params = {}) {
   const table = translations[state.language] || translations.en;
