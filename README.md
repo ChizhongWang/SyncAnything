@@ -187,7 +187,9 @@ Start the stdio server with:
 syncanything mcp
 ```
 
-Example MCP client configuration:
+### Claude Code
+
+Add to `~/.claude/settings.json` or the project `.mcp.json`:
 
 ```json
 {
@@ -199,6 +201,23 @@ Example MCP client configuration:
   }
 }
 ```
+
+### Cursor
+
+Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per-project):
+
+```json
+{
+  "mcpServers": {
+    "syncanything": {
+      "command": "syncanything",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Cursor after saving. The MCP server appears under **Settings → MCP** when connected.
 
 For a non-default local home or database, keep the database and connection metadata together. If `--db` is supplied and `SYNCANYTHING_HOME` is not set, SyncAnything infers the home directory from the database parent:
 
