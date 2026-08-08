@@ -16,7 +16,7 @@ from typing import Any
 
 KEYCHAIN_SERVICE = "SyncAnything.CiteAnything"
 SITE_URLS = {
-    "international": "https://citeanything.veri-glow.com",
+    "international": "https://citeanything.app",
     "china": "https://citeanything.cn",
 }
 

@@ -39,7 +39,7 @@ For a single headless connection:
 
 ```bash
 export SYNCANYTHING_CITEANYTHING_API_KEY="ca_your_context_read_key"
-export CITEANYTHING_BASE_URL="https://citeanything.veri-glow.com"
+export CITEANYTHING_BASE_URL="https://citeanything.app"
 syncanything index
 syncanything serve --no-index
 ```
