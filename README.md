@@ -12,7 +12,7 @@ SyncAnything is a local, agent-native index for conversations across AI products
 
 Phase 1 is intentionally read-only:
 
-- discovers local Claude Code, Codex, Kimi Code, and Pi sessions;
+- discovers local Claude Code, Codex, Cursor, Kimi Code, and Pi sessions;
 - connects to CiteAnything as a product-level context source;
 - indexes visible user and assistant text in SQLite FTS5;
 - searches Chinese and English conversation text;
@@ -187,7 +187,9 @@ Start the stdio server with:
 syncanything mcp
 ```
 
-Example MCP client configuration:
+### Claude Code
+
+Add to `~/.claude/settings.json` or the project `.mcp.json`:
 
 ```json
 {
@@ -199,6 +201,23 @@ Example MCP client configuration:
   }
 }
 ```
+
+### Cursor
+
+Add to `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per-project):
+
+```json
+{
+  "mcpServers": {
+    "syncanything": {
+      "command": "syncanything",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Cursor after saving. The MCP server appears under **Settings → MCP** when connected.
 
 For a non-default local home or database, keep the database and connection metadata together. If `--db` is supplied and `SYNCANYTHING_HOME` is not set, SyncAnything infers the home directory from the database parent:
 
@@ -255,16 +274,17 @@ rather than re-downloaded.
 
 ## Source support
 
-| Source | Location | Phase 1 status |
-|---|---|---|
-| Claude Code | `~/.claude/projects/**/*.jsonl` | Verified locally |
-| Codex | `~/.codex/sessions/**/*.jsonl` | Verified locally |
-| Kimi Code (legacy) | `~/.kimi/sessions/*/*/context.jsonl` | Verified locally |
-| Kimi Code (current) | `~/.kimi-code/sessions/*/*/agents/main/wire.jsonl` | Adapter included |
-| Pi | `~/.pi/agent/sessions/**/*.jsonl` | Official format implemented |
-| CiteAnything | Authenticated Conversation API | Product-level adapter included |
-| OpenCode | SQLite session store | Next adapter |
-| Grok Build | Pending stable local export contract | Next adapter |
+| | Source | Location | Phase 1 status |
+|---|---|---|---|
+| <img src="docs/logos/claudecode-color.svg" width="20" alt="Claude Code"> | Claude Code | `~/.claude/projects/**/*.jsonl` | Verified locally |
+| <img src="docs/logos/codex-color.svg" width="20" alt="Codex"> | Codex | `~/.codex/sessions/**/*.jsonl` | Verified locally |
+| <img src="docs/logos/cursor.svg" width="20" alt="Cursor"> | Cursor | `state.vscdb` (composerHeaders + cursorDiskKV) | Verified locally |
+| <img src="docs/logos/kimi-color.svg" width="20" alt="Kimi Code"> | Kimi Code (legacy) | `~/.kimi/sessions/*/*/context.jsonl` | Verified locally |
+| <img src="docs/logos/kimi-color.svg" width="20" alt="Kimi Code"> | Kimi Code (current) | `~/.kimi-code/sessions/*/*/agents/main/wire.jsonl` | Adapter included |
+| <img src="docs/logos/pi.svg" width="20" alt="Pi"> | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Official format implemented |
+| <img src="docs/logos/citeanything.png" width="20" alt="CiteAnything"> | CiteAnything | Authenticated Conversation API | Product-level adapter included |
+| <img src="docs/logos/opencode.svg" width="20" alt="OpenCode"> | OpenCode | SQLite session store | Next adapter |
+| <img src="docs/logos/grok.svg" width="20" alt="Grok Build"> | Grok Build | Pending stable local export contract | Next adapter |
 
 ## Development
 
