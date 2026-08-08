@@ -57,7 +57,7 @@ class CiteAnythingAdapter(SourceAdapter):
         self.base_url = (
             base_url
             or os.environ.get("CITEANYTHING_BASE_URL")
-            or "https://citeanything.veri-glow.com"
+            or "https://citeanything.app"
         ).rstrip("/")
         self.api_key = (
             api_key
@@ -109,7 +109,7 @@ class CiteAnythingAdapter(SourceAdapter):
         host = base_url.split("://", 1)[-1].split("/", 1)[0].lower()
         if host == "citeanything.cn":
             return "china"
-        if host == "citeanything.veri-glow.com":
+        if host in {"citeanything.app", "citeanything.veri-glow.com"}:
             return "international"
         return "".join(
             character if character.isalnum() else "-" for character in host
