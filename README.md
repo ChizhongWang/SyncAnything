@@ -12,7 +12,7 @@ SyncAnything is a local, agent-native index for conversations across AI products
 
 Phase 1 is intentionally read-only:
 
-- discovers local Claude Code, Codex, Kimi Code, and Pi sessions;
+- discovers local Claude Code, Codex, Cursor, Kimi Code, and Pi sessions;
 - connects to CiteAnything as a product-level context source;
 - indexes visible user and assistant text in SQLite FTS5;
 - searches Chinese and English conversation text;
@@ -278,6 +278,7 @@ rather than re-downloaded.
 |---|---|---|
 | Claude Code | `~/.claude/projects/**/*.jsonl` | Verified locally |
 | Codex | `~/.codex/sessions/**/*.jsonl` | Verified locally |
+| Cursor | `state.vscdb` (composerHeaders + cursorDiskKV) | Verified locally |
 | Kimi Code (legacy) | `~/.kimi/sessions/*/*/context.jsonl` | Verified locally |
 | Kimi Code (current) | `~/.kimi-code/sessions/*/*/agents/main/wire.jsonl` | Adapter included |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Official format implemented |

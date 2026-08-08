@@ -47,14 +47,14 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser = subparsers.add_parser("search", help="Search indexed sessions.")
     search_parser.add_argument("query")
     search_parser.add_argument(
-        "--source", choices=["claude", "codex", "kimi", "pi", "citeanything"]
+        "--source", choices=["claude", "codex", "cursor", "kimi", "pi", "citeanything"]
     )
     search_parser.add_argument("--limit", type=int, default=20)
     search_parser.add_argument("--json", action="store_true")
 
     list_parser = subparsers.add_parser("list", help="List recent sessions.")
     list_parser.add_argument(
-        "--source", choices=["claude", "codex", "kimi", "pi", "citeanything"]
+        "--source", choices=["claude", "codex", "cursor", "kimi", "pi", "citeanything"]
     )
     list_parser.add_argument("--limit", type=int, default=30)
     list_parser.add_argument("--json", action="store_true")
