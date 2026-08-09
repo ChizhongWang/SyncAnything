@@ -29,6 +29,7 @@ from syncanything.service import SyncAnythingService
 from syncanything.sources.citeanything import CiteAnythingAdapter
 from syncanything.sources.claude import ClaudeAdapter
 from syncanything.sources.codex import CodexAdapter
+from syncanything.sources.cursor import CursorAdapter
 from syncanything.sources.kimi import KimiAdapter
 from syncanything.sources.pi import PiAdapter
 
@@ -299,6 +300,126 @@ class AdapterTests(unittest.TestCase):
             assert pi is not None
             self.assertEqual(pi.id, "pi:p1")
             self.assertEqual(len(pi.messages), 2)
+
+    def test_cursor_indexes_app_and_cli_without_splitting_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            cache_root = root / "cache"
+            chats_root = root / "chats"
+            projects_root = root / "projects"
+            session_id = "11111111-2222-3333-4444-555555555555"
+            composer_id = "aaaa-bbbb-cccc-dddd"
+            chat_dir = chats_root / "abcdef0123456789abcdef0123456789" / session_id
+            chat_dir.mkdir(parents=True)
+            (chat_dir / "meta.json").write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "createdAtMs": 1_700_000_000_000,
+                        "updatedAtMs": 1_700_000_100_000,
+                        "hasConversation": True,
+                        "title": "CLI session about indexing",
+                        "cwd": "/work",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            transcript = (
+                projects_root
+                / "Users-work"
+                / "agent-transcripts"
+                / session_id
+                / f"{session_id}.jsonl"
+            )
+            write_jsonl(
+                transcript,
+                [
+                    {
+                        "role": "user",
+                        "message": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "<timestamp>Sunday, Aug 9, 2026</timestamp>\n"
+                                        "<user_query>\n请支持 Cursor CLI 会话索引\n</user_query>"
+                                    ),
+                                }
+                            ]
+                        },
+                    },
+                    {
+                        "role": "assistant",
+                        "message": {
+                            "content": [
+                                {"type": "text", "text": "已接入 Cursor CLI。"},
+                                {"type": "tool_use", "name": "Shell", "input": {"command": "ls"}},
+                            ]
+                        },
+                    },
+                ],
+            )
+
+            db_path = root / "state.vscdb"
+            connection = sqlite3.connect(db_path)
+            connection.execute(
+                "CREATE TABLE composerHeaders ("
+                "composerId TEXT PRIMARY KEY, lastUpdatedAt INTEGER, isSubagent INTEGER, value TEXT)"
+            )
+            connection.execute("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)")
+            connection.execute(
+                "INSERT INTO composerHeaders(composerId, lastUpdatedAt, isSubagent, value) VALUES (?, ?, 0, ?)",
+                (
+                    composer_id,
+                    1_700_000_050_000,
+                    json.dumps({"name": "App composer", "createdAt": 1_700_000_000_000, "unifiedMode": "agent"}),
+                ),
+            )
+            connection.execute(
+                "INSERT INTO cursorDiskKV(key, value) VALUES (?, ?)",
+                (
+                    f"bubbleId:{composer_id}:b1",
+                    json.dumps({"type": 1, "text": "App 窗口里的问题", "createdAt": "2026-08-09T00:00:00Z"}),
+                ),
+            )
+            connection.execute(
+                "INSERT INTO cursorDiskKV(key, value) VALUES (?, ?)",
+                (
+                    f"bubbleId:{composer_id}:b2",
+                    json.dumps({"type": 2, "text": "App 窗口里的回答", "createdAt": "2026-08-09T00:00:01Z"}),
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            adapter = CursorAdapter(
+                cache_root,
+                chats_root=chats_root,
+                projects_root=projects_root,
+                state_dbs=[db_path],
+            )
+            discovered = list(adapter.discover())
+            self.assertEqual(
+                {path.name for path in discovered},
+                {f"composer-{composer_id}.json", f"cli-{session_id}.json"},
+            )
+
+            app_session = adapter.parse(cache_root / f"composer-{composer_id}.json")
+            cli_session = adapter.parse(cache_root / f"cli-{session_id}.json")
+            assert app_session is not None and cli_session is not None
+            self.assertEqual(app_session.id, f"cursor:{composer_id}")
+            self.assertEqual(cli_session.id, f"cursor:{session_id}")
+            self.assertEqual(app_session.metadata.get("cursor_surface"), "app")
+            self.assertEqual(cli_session.metadata.get("cursor_surface"), "cli")
+            self.assertEqual(
+                [message.text for message in app_session.messages],
+                ["App 窗口里的问题", "App 窗口里的回答"],
+            )
+            self.assertEqual(
+                [message.text for message in cli_session.messages],
+                ["请支持 Cursor CLI 会话索引", "已接入 Cursor CLI。"],
+            )
+            self.assertEqual(cli_session.cwd, "/work")
 
 
 class IndexAndMcpTests(unittest.TestCase):

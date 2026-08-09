@@ -278,7 +278,8 @@ rather than re-downloaded.
 |---|---|---|---|
 | <img src="docs/logos/claudecode-color.svg" width="20" alt="Claude Code"> | Claude Code | `~/.claude/projects/**/*.jsonl` | Verified locally |
 | <img src="docs/logos/codex-color.svg" width="20" alt="Codex"> | Codex | `~/.codex/sessions/**/*.jsonl` | Verified locally |
-| <img src="docs/logos/cursor.svg" width="20" alt="Cursor"> | Cursor | `state.vscdb` (composerHeaders + cursorDiskKV) | Verified locally |
+| <img src="docs/logos/cursor.svg" width="20" alt="Cursor"> | Cursor App | `state.vscdb` (composerHeaders + cursorDiskKV) | Verified locally |
+| <img src="docs/logos/cursor.svg" width="20" alt="Cursor"> | Cursor CLI | `~/.cursor/chats/*/*/meta.json` + `agent-transcripts` | Verified locally |
 | <img src="docs/logos/kimi-color.svg" width="20" alt="Kimi Code"> | Kimi Code (legacy) | `~/.kimi/sessions/*/*/context.jsonl` | Verified locally |
 | <img src="docs/logos/kimi-color.svg" width="20" alt="Kimi Code"> | Kimi Code (current) | `~/.kimi-code/sessions/*/*/agents/main/wire.jsonl` | Adapter included |
 | <img src="docs/logos/pi.svg" width="20" alt="Pi"> | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Official format implemented |
