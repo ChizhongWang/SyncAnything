@@ -13,6 +13,15 @@ from syncanything.mcp import run_mcp
 from syncanything.service import SyncAnythingService
 from syncanything.sources import local_adapters
 from syncanything.web import serve
+from syncanything.works import (
+    WorksConflictError,
+    WorksSyncError,
+    configured_works_clients,
+    pull_work,
+    push_work,
+    select_checkout_client,
+    select_works_client,
+)
 
 READ_COMMANDS = frozenset({"search", "list", "show", "reference", "status"})
 
@@ -77,6 +86,23 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--port", type=int, default=7331)
     serve_parser.add_argument("--no-index", action="store_true")
 
+    works_parser = subparsers.add_parser(
+        "works", help="Pull and push CiteAnything works for local editing."
+    )
+    works_commands = works_parser.add_subparsers(dest="works_command", required=True)
+    works_list = works_commands.add_parser("list", help="List durable CiteAnything works.")
+    works_list.add_argument("--connection")
+    works_list.add_argument("--json", action="store_true")
+    works_pull = works_commands.add_parser("pull", help="Download one work into a new directory.")
+    works_pull.add_argument("work", help="Work name or outputs/<name> path.")
+    works_pull.add_argument("destination", nargs="?")
+    works_pull.add_argument("--connection")
+    works_pull.add_argument("--json", action="store_true")
+    works_push = works_commands.add_parser("push", help="Upload a modified local work.")
+    works_push.add_argument("directory", nargs="?", default=".")
+    works_push.add_argument("--connection")
+    works_push.add_argument("--json", action="store_true")
+
     subparsers.add_parser("mcp", help="Run the agent-native MCP server over stdio.")
     return parser
 
@@ -111,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
     db_path = Path(args.db).expanduser() if args.db else default_db_path()
     if args.db:
         _configure_home_from_db(db_path)
+    if args.command == "works":
+        return _run_works(args)
     with ConversationIndex(db_path) as index:
         service = SyncAnythingService(index)
         # Read commands re-scan local sources first so results always reflect the
@@ -208,6 +236,60 @@ def main(argv: list[str] | None = None) -> int:
             run_mcp(index)
             return 0
     return 0
+
+
+def _run_works(args: argparse.Namespace) -> int:
+    try:
+        clients = configured_works_clients()
+        client = (
+            select_checkout_client(clients, Path(args.directory), args.connection)
+            if args.works_command == "push"
+            else select_works_client(clients, args.connection)
+        )
+        if args.works_command == "list":
+            payload = client.list_works()
+            if args.json:
+                print(json.dumps(payload, ensure_ascii=False, indent=2))
+            else:
+                revision = payload.get("revision") or "no checkpoint"
+                print(f"{client.connection.name} · revision {revision}")
+                for work in payload.get("works", []):
+                    print(
+                        f"{work.get('path', '')}\t{work.get('file_count', 0)} files\t"
+                        f"{_human_bytes(int(work.get('total_bytes', 0)))}"
+                    )
+            return 0
+        if args.works_command == "pull":
+            result = pull_work(
+                client,
+                args.work,
+                Path(args.destination) if args.destination else None,
+            )
+            if args.json:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print(f"Pulled {result['work_path']} -> {result['local_path']}")
+                print(f"Base revision: {result['revision']}")
+            return 0
+        if args.works_command == "push":
+            result = push_work(client, Path(args.directory))
+            if args.json:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print(f"Pushed {result['work_path']} from {result['local_path']}")
+                print(f"New revision: {result['revision']}")
+            return 0
+    except WorksConflictError as error:
+        suffix = f" Current revision: {error.current_revision}." if error.current_revision else ""
+        print(
+            f"Push conflict: {error}.{suffix} Pull the work again, reapply your edits, and push.",
+            file=sys.stderr,
+        )
+        return 3
+    except WorksSyncError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    return 2
 
 
 if __name__ == "__main__":
