@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import plistlib
 import re
 import sqlite3
 import subprocess
@@ -29,6 +30,9 @@ from syncanything.service import SyncAnythingService
 from syncanything.shortcut import (
     HOTKEY_LABEL,
     SERVER_LABEL,
+    _bootstrap_launch_agent,
+    _plist_matches,
+    _wait_for_server,
     hotkey_launch_agent,
     hotkey_source,
     server_launch_agent,
@@ -40,6 +44,7 @@ from syncanything.sources.codex import CodexAdapter
 from syncanything.sources.cursor import CursorAdapter
 from syncanything.sources.kimi import KimiAdapter
 from syncanything.sources.pi import PiAdapter
+from syncanything.web import SyncAnythingHandler
 
 
 def write_jsonl(path: Path, records: list[dict]) -> None:
@@ -62,12 +67,39 @@ class AdapterTests(unittest.TestCase):
         for name in ("app.js", "index.html", "logo.svg", "styles.css"):
             self.assertTrue(static.joinpath(name).is_file(), name)
 
+    def test_web_assets_include_native_overlay_mode(self) -> None:
+        static = files("syncanything.static")
+        script = static.joinpath("app.js").read_text(encoding="utf-8")
+        styles = static.joinpath("styles.css").read_text(encoding="utf-8")
+        self.assertIn('PAGE_PARAMS.get("overlay") === "1"', script)
+        self.assertIn("syncAnythingOverlayDidShow", script)
+        self.assertIn('type: "resize"', script)
+        self.assertIn('params.set("refresh", "background")', script)
+        self.assertIn("html.overlay-mode.overlay-has-query", styles)
+
+    def test_web_refresh_mode_rejects_unknown_values(self) -> None:
+        self.assertEqual(SyncAnythingHandler._refresh_mode({}), "sync")
+        self.assertEqual(
+            SyncAnythingHandler._refresh_mode({"refresh": ["background"]}),
+            "background",
+        )
+        self.assertEqual(
+            SyncAnythingHandler._refresh_mode({"refresh": ["unexpected"]}),
+            "sync",
+        )
+
     def test_macos_hotkey_registers_the_documented_shortcut(self) -> None:
         source = hotkey_source("http://127.0.0.1:7331")
         self.assertIn("RegisterEventHotKey", source)
         self.assertIn("kVK_ANSI_K", source)
         self.assertIn("cmdKey | controlKey", source)
-        self.assertIn('openURL:[NSURL URLWithString:@"http://127.0.0.1:7331"]', source)
+        self.assertIn("SyncAnythingPanel : NSPanel", source)
+        self.assertIn("WKWebView", source)
+        self.assertIn("NSVisualEffectMaterialHUDWindow", source)
+        self.assertIn('stringByAppendingString:@"/?overlay=1"', source)
+        self.assertIn('addScriptMessageHandler:self name:@"syncanything"', source)
+        self.assertIn("didFailProvisionalNavigation", source)
+        self.assertIn("scheduleOverlayReload", source)
 
     def test_shortcut_launch_agents_use_local_server_and_native_helper(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -85,6 +117,38 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(hotkey["Label"], HOTKEY_LABEL)
             self.assertEqual(hotkey["ProgramArguments"], [str(paths.helper)])
             self.assertEqual(hotkey["LimitLoadToSessionType"], "Aqua")
+
+    def test_shortcut_reuses_only_an_unchanged_server_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "server.plist"
+            payload = {"Label": SERVER_LABEL, "RunAtLoad": True}
+            path.write_bytes(plistlib.dumps(payload))
+            self.assertTrue(_plist_matches(path, payload))
+            self.assertFalse(_plist_matches(path, {**payload, "RunAtLoad": False}))
+            path.write_text("not a plist", encoding="utf-8")
+            self.assertFalse(_plist_matches(path, payload))
+
+    @patch("syncanything.shortcut.time.sleep")
+    @patch("syncanything.shortcut._launchctl")
+    def test_shortcut_install_retries_launchd_bootstrap(self, launchctl, sleep) -> None:
+        launchctl.side_effect = [
+            subprocess.CompletedProcess(["launchctl"], 5, "", "Input/output error"),
+            subprocess.CompletedProcess(["launchctl"], 0, "", ""),
+        ]
+        _bootstrap_launch_agent("gui/501", Path("/tmp/example.plist"))
+        self.assertEqual(launchctl.call_count, 2)
+        sleep.assert_called_once_with(0.25)
+
+    @patch("syncanything.shortcut.time.sleep")
+    @patch("syncanything.shortcut._server_reachable", side_effect=[False, True])
+    def test_shortcut_waits_for_server_before_starting_webview(
+        self,
+        server_reachable,
+        sleep,
+    ) -> None:
+        self.assertTrue(_wait_for_server(timeout=1.0))
+        self.assertEqual(server_reachable.call_count, 2)
+        sleep.assert_called_once_with(0.1)
 
     def test_syncanything_home_uses_env_without_expanding_home(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

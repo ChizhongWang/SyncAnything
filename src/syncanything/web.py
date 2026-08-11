@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 from syncanything.connections import ConnectionStore, SITE_URLS
 from syncanything.index import ConversationIndex
 from syncanything.service import SyncAnythingService
+from syncanything.sources import local_adapters
 from syncanything.sources.citeanything import CiteAnythingAdapter
 
 
@@ -20,6 +21,7 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
     service: SyncAnythingService
     sync_lock = threading.Lock()
     sync_state: dict[str, object] = {"running": False, "report": None, "error": None}
+    local_refresh_lock = threading.Lock()
 
     def _refresh_local(self) -> None:
         """Re-scan local sources before serving a read.
@@ -34,11 +36,45 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
         except sqlite3.Error:
             pass  # A stale answer beats failing the request.
 
+    def _refresh_local_in_background(self) -> bool:
+        """Refresh local sources without putting discovery on the read path."""
+        if self.sync_state.get("running"):
+            return False
+        if not self.local_refresh_lock.acquire(blocking=False):
+            return False
+        db_path = self.index.db_path
+
+        def run() -> None:
+            try:
+                with ConversationIndex(db_path, adapters=local_adapters()) as background_index:
+                    background_index.refresh(max_age_seconds=10.0)
+            except (OSError, sqlite3.Error, ValueError):
+                pass  # The current index remains usable when refresh fails.
+            finally:
+                self.local_refresh_lock.release()
+
+        threading.Thread(
+            target=run,
+            name="syncanything-local-refresh",
+            daemon=True,
+        ).start()
+        return True
+
+    @staticmethod
+    def _refresh_mode(query: dict[str, list[str]]) -> str:
+        mode = query.get("refresh", ["sync"])[0]
+        return mode if mode in {"sync", "background", "none"} else "sync"
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/api/status":
-            self._refresh_local()
+            query = parse_qs(parsed.query)
+            refresh_mode = self._refresh_mode(query)
+            if refresh_mode == "sync":
+                self._refresh_local()
             self._json(self.index.stats())
+            if refresh_mode == "background":
+                self._refresh_local_in_background()
             return
         if parsed.path == "/api/connections":
             self._json({"citeanything": ConnectionStore().public_connections()})
@@ -47,14 +83,18 @@ class SyncAnythingHandler(BaseHTTPRequestHandler):
             self._json(dict(self.sync_state))
             return
         if parsed.path == "/api/sessions":
-            self._refresh_local()
             query = parse_qs(parsed.query)
+            refresh_mode = self._refresh_mode(query)
+            if refresh_mode == "sync":
+                self._refresh_local()
             phrase = query.get("q", [""])[0]
             source = query.get("source", [None])[0] or None
             limit = int(query.get("limit", ["50"])[0])
             results = self.service.search_sessions(phrase, source=source, limit=limit)
             total = self.service.count_sessions(phrase, source=source)
             self._json({"results": results, "total": total})
+            if refresh_mode == "background":
+                self._refresh_local_in_background()
             return
         if parsed.path == "/api/session":
             query = parse_qs(parsed.query)
