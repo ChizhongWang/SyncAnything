@@ -154,19 +154,20 @@ syncanything show claude:SESSION_ID --last 12
 syncanything reference codex:SESSION_ID
 syncanything status --json
 syncanything shortcut status
-syncanything works list
-syncanything works pull outputs/my-article ./my-article
+citeanything works list --connection international
+citeanything works pull outputs/my-article ./my-article --connection international
 # Edit ./my-article with Codex, Claude Code, Cursor, or any local tool.
-syncanything works push ./my-article
+citeanything works push ./my-article
 ```
 
 ### CiteAnything works
 
-`works pull` downloads one server-owned work into a new local directory and
-writes `.citeanything-work.json`. That metadata contains the site, work path,
-and durable workspace revision, but never the API key. Edit the ordinary files
-with local Codex or another tool, then run `works push` to replace that work in
-CiteAnything and its cloud sandbox.
+The official `citeanything` CLI owns creation and updates of CiteAnything
+works. `works pull` downloads one server-owned work into a new local directory
+and writes `.citeanything-work.json`. That metadata contains the site, work
+path, and durable workspace revision, but never the API key. Edit the ordinary
+files with local Codex or another tool, then run `works push` to replace that
+work in CiteAnything and its cloud sandbox.
 
 Push is refused if the server workspace changed after the pull or while a cloud
 Agent Run is active. Pull the latest work into a new directory, reapply the local
@@ -175,10 +176,17 @@ revision. With China and international accounts connected together, select one
 explicitly:
 
 ```bash
-syncanything works list --connection international
-syncanything works pull article --connection international
-syncanything works push ./article --connection international
+citeanything works list --connection international
+citeanything works pull article --connection international
+citeanything works create ./new-report --name new-report --connection international
+citeanything works push ./article --connection international
 ```
+
+`syncanything works list`, `pull`, and `push` remain temporarily available for
+existing checkouts. The legacy `push` command prints a deprecation warning and
+will be removed after the CiteAnything CLI migration. SyncAnything remains the
+local search, indexing, and context-discovery product; it is not the source of
+truth for CiteAnything content.
 
 All commands also work through the module entrypoint:
 

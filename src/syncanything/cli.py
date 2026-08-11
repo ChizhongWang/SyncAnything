@@ -89,7 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--no-index", action="store_true")
 
     works_parser = subparsers.add_parser(
-        "works", help="Pull and push CiteAnything works for local editing."
+        "works", help="Legacy compatibility for CiteAnything work checkouts."
     )
     works_commands = works_parser.add_subparsers(dest="works_command", required=True)
     works_list = works_commands.add_parser("list", help="List durable CiteAnything works.")
@@ -100,7 +100,9 @@ def build_parser() -> argparse.ArgumentParser:
     works_pull.add_argument("destination", nargs="?")
     works_pull.add_argument("--connection")
     works_pull.add_argument("--json", action="store_true")
-    works_push = works_commands.add_parser("push", help="Upload a modified local work.")
+    works_push = works_commands.add_parser(
+        "push", help="Deprecated: upload a checkout (use `citeanything works push`)."
+    )
     works_push.add_argument("directory", nargs="?", default=".")
     works_push.add_argument("--connection")
     works_push.add_argument("--json", action="store_true")
@@ -286,6 +288,12 @@ def _run_shortcut(args: argparse.Namespace) -> int:
 
 def _run_works(args: argparse.Namespace) -> int:
     try:
+        if args.works_command == "push":
+            print(
+                "Deprecated: SyncAnything no longer owns CiteAnything writes; "
+                "use `citeanything works push` instead.",
+                file=sys.stderr,
+            )
         clients = configured_works_clients()
         client = (
             select_checkout_client(clients, Path(args.directory), args.connection)
