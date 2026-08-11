@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from syncanything import __version__
 from syncanything.index import ConversationIndex, default_db_path
 from syncanything.mcp import run_mcp
 from syncanything.service import SyncAnythingService
+from syncanything.shortcut import install_shortcut, shortcut_status, uninstall_shortcut
 from syncanything.sources import local_adapters
 from syncanything.web import serve
 from syncanything.works import (
@@ -103,6 +105,21 @@ def build_parser() -> argparse.ArgumentParser:
     works_push.add_argument("--connection")
     works_push.add_argument("--json", action="store_true")
 
+    shortcut_parser = subparsers.add_parser(
+        "shortcut", help="Install or manage the macOS global search shortcut."
+    )
+    shortcut_commands = shortcut_parser.add_subparsers(
+        dest="shortcut_command", required=True
+    )
+    shortcut_commands.add_parser(
+        "install", help="Start SyncAnything at login and register Control+Command+K."
+    )
+    shortcut_commands.add_parser("uninstall", help="Remove the login agents and hotkey.")
+    shortcut_status_parser = shortcut_commands.add_parser(
+        "status", help="Show whether the global shortcut is installed and running."
+    )
+    shortcut_status_parser.add_argument("--json", action="store_true")
+
     subparsers.add_parser("mcp", help="Run the agent-native MCP server over stdio.")
     return parser
 
@@ -139,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
         _configure_home_from_db(db_path)
     if args.command == "works":
         return _run_works(args)
+    if args.command == "shortcut":
+        return _run_shortcut(args)
     with ConversationIndex(db_path) as index:
         service = SyncAnythingService(index)
         # Read commands re-scan local sources first so results always reflect the
@@ -236,6 +255,33 @@ def main(argv: list[str] | None = None) -> int:
             run_mcp(index)
             return 0
     return 0
+
+
+def _run_shortcut(args: argparse.Namespace) -> int:
+    try:
+        if args.shortcut_command == "install":
+            state = install_shortcut()
+            print(f"Installed SyncAnything global search: {state['shortcut']}")
+            print(f"Search page: {state['url']}")
+            return 0
+        if args.shortcut_command == "uninstall":
+            uninstall_shortcut()
+            print("Removed the SyncAnything global search shortcut")
+            return 0
+        state = shortcut_status()
+        if args.json:
+            print(json.dumps(state, ensure_ascii=False, indent=2))
+        else:
+            installed = "installed" if state["installed"] else "not installed"
+            running = "running" if state["hotkey_loaded"] else "not running"
+            server = "ready" if state["server_reachable"] else "not ready"
+            print(f"{state['shortcut']} · {installed} · {running} · server {server}")
+            print(state["url"])
+        return 0 if state["installed"] else 1
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        detail = getattr(error, "stderr", "") or str(error)
+        print(f"Could not configure the SyncAnything shortcut: {detail.strip()}", file=sys.stderr)
+        return 2
 
 
 def _run_works(args: argparse.Namespace) -> int:

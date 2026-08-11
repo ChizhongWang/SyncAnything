@@ -63,6 +63,25 @@ syncanything serve
 
 Open `http://127.0.0.1:7331`.
 
+On macOS, install the global search shortcut once:
+
+```bash
+syncanything shortcut install
+```
+
+SyncAnything will then start its local-only search service when you sign in to
+the Mac. Press **Control + Command + K** from any app to open the search
+page with its search field focused. Inspect or remove the integration with:
+
+```bash
+syncanything shortcut status
+syncanything shortcut uninstall
+```
+
+The installer creates two per-user LaunchAgents: one for the local server and a
+small native hotkey listener. It does not require Accessibility permission and
+never exposes the server beyond `127.0.0.1`.
+
 The interface opens in Simplified Chinese or English depending on your browser, and
 the toolbar button switches between them; the choice is remembered in that browser.
 
@@ -130,6 +149,7 @@ syncanything list --source codex
 syncanything show claude:SESSION_ID --last 12
 syncanything reference codex:SESSION_ID
 syncanything status --json
+syncanything shortcut status
 syncanything works list
 syncanything works pull outputs/my-article ./my-article
 # Edit ./my-article with Codex, Claude Code, Cursor, or any local tool.

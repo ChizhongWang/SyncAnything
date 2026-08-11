@@ -26,6 +26,14 @@ from syncanything.index import ConversationIndex
 from syncanything.mcp import McpServer
 from syncanything.metrics import TextMetrics, book_equivalents, measure
 from syncanything.service import SyncAnythingService
+from syncanything.shortcut import (
+    HOTKEY_LABEL,
+    SERVER_LABEL,
+    hotkey_launch_agent,
+    hotkey_source,
+    server_launch_agent,
+    shortcut_paths,
+)
 from syncanything.sources.citeanything import CiteAnythingAdapter
 from syncanything.sources.claude import ClaudeAdapter
 from syncanything.sources.codex import CodexAdapter
@@ -53,6 +61,30 @@ class AdapterTests(unittest.TestCase):
         static = files("syncanything.static")
         for name in ("app.js", "index.html", "logo.svg", "styles.css"):
             self.assertTrue(static.joinpath(name).is_file(), name)
+
+    def test_macos_hotkey_registers_the_documented_shortcut(self) -> None:
+        source = hotkey_source("http://127.0.0.1:7331")
+        self.assertIn("RegisterEventHotKey", source)
+        self.assertIn("kVK_ANSI_K", source)
+        self.assertIn("cmdKey | controlKey", source)
+        self.assertIn('openURL:[NSURL URLWithString:@"http://127.0.0.1:7331"]', source)
+
+    def test_shortcut_launch_agents_use_local_server_and_native_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = shortcut_paths(root / "home", root / "LaunchAgents")
+            server = server_launch_agent(Path("/usr/local/bin/syncanything"), paths)
+            hotkey = hotkey_launch_agent(paths)
+            self.assertEqual(server["Label"], SERVER_LABEL)
+            self.assertEqual(
+                server["ProgramArguments"],
+                ["/usr/local/bin/syncanything", "serve", "--no-index"],
+            )
+            self.assertTrue(server["RunAtLoad"])
+            self.assertTrue(server["KeepAlive"])
+            self.assertEqual(hotkey["Label"], HOTKEY_LABEL)
+            self.assertEqual(hotkey["ProgramArguments"], [str(paths.helper)])
+            self.assertEqual(hotkey["LimitLoadToSessionType"], "Aqua")
 
     def test_syncanything_home_uses_env_without_expanding_home(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
