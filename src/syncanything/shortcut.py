@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -342,6 +343,24 @@ def _service_loaded(label: str) -> bool:
     return _launchctl("print", _launch_target(label), check=False).returncode == 0
 
 
+def _bootstrap_launch_agent(domain: str, path: Path, attempts: int = 5) -> None:
+    """Load a freshly replaced agent after launchd finishes its bootout."""
+    result: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(attempts):
+        result = _launchctl("bootstrap", domain, str(path), check=False)
+        if result.returncode == 0:
+            return
+        if attempt + 1 < attempts:
+            time.sleep(0.25 * (attempt + 1))
+    assert result is not None
+    raise subprocess.CalledProcessError(
+        result.returncode,
+        result.args,
+        output=result.stdout,
+        stderr=result.stderr,
+    )
+
+
 def _server_reachable(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> bool:
     try:
         with socket.create_connection((host, port), timeout=0.2):
@@ -417,8 +436,8 @@ def install_shortcut(sync_executable: Path | None = None) -> dict[str, Any]:
     _write_plist(paths.server_plist, server_launch_agent(executable, paths))
     _write_plist(paths.hotkey_plist, hotkey_launch_agent(paths))
     domain = f"gui/{os.getuid()}"
-    _launchctl("bootstrap", domain, str(paths.server_plist))
-    _launchctl("bootstrap", domain, str(paths.hotkey_plist))
+    _bootstrap_launch_agent(domain, paths.server_plist)
+    _bootstrap_launch_agent(domain, paths.hotkey_plist)
     return shortcut_status()
 
 

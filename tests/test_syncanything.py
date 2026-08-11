@@ -29,6 +29,7 @@ from syncanything.service import SyncAnythingService
 from syncanything.shortcut import (
     HOTKEY_LABEL,
     SERVER_LABEL,
+    _bootstrap_launch_agent,
     hotkey_launch_agent,
     hotkey_source,
     server_launch_agent,
@@ -40,6 +41,7 @@ from syncanything.sources.codex import CodexAdapter
 from syncanything.sources.cursor import CursorAdapter
 from syncanything.sources.kimi import KimiAdapter
 from syncanything.sources.pi import PiAdapter
+from syncanything.web import SyncAnythingHandler
 
 
 def write_jsonl(path: Path, records: list[dict]) -> None:
@@ -69,7 +71,19 @@ class AdapterTests(unittest.TestCase):
         self.assertIn('PAGE_PARAMS.get("overlay") === "1"', script)
         self.assertIn("syncAnythingOverlayDidShow", script)
         self.assertIn('type: "resize"', script)
+        self.assertIn('params.set("refresh", "background")', script)
         self.assertIn("html.overlay-mode.overlay-has-query", styles)
+
+    def test_web_refresh_mode_rejects_unknown_values(self) -> None:
+        self.assertEqual(SyncAnythingHandler._refresh_mode({}), "sync")
+        self.assertEqual(
+            SyncAnythingHandler._refresh_mode({"refresh": ["background"]}),
+            "background",
+        )
+        self.assertEqual(
+            SyncAnythingHandler._refresh_mode({"refresh": ["unexpected"]}),
+            "sync",
+        )
 
     def test_macos_hotkey_registers_the_documented_shortcut(self) -> None:
         source = hotkey_source("http://127.0.0.1:7331")
@@ -98,6 +112,17 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(hotkey["Label"], HOTKEY_LABEL)
             self.assertEqual(hotkey["ProgramArguments"], [str(paths.helper)])
             self.assertEqual(hotkey["LimitLoadToSessionType"], "Aqua")
+
+    @patch("syncanything.shortcut.time.sleep")
+    @patch("syncanything.shortcut._launchctl")
+    def test_shortcut_install_retries_launchd_bootstrap(self, launchctl, sleep) -> None:
+        launchctl.side_effect = [
+            subprocess.CompletedProcess(["launchctl"], 5, "", "Input/output error"),
+            subprocess.CompletedProcess(["launchctl"], 0, "", ""),
+        ]
+        _bootstrap_launch_agent("gui/501", Path("/tmp/example.plist"))
+        self.assertEqual(launchctl.call_count, 2)
+        sleep.assert_called_once_with(0.25)
 
     def test_syncanything_home_uses_env_without_expanding_home(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

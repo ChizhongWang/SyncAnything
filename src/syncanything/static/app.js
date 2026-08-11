@@ -491,7 +491,7 @@ async function waitForSync(onProgress) {
 }
 
 async function loadStatus() {
-  state.status = await getJson("/api/status");
+  state.status = await getJson(OVERLAY_MODE ? "/api/status?refresh=background" : "/api/status");
   renderStatus();
   renderStats();
 }
@@ -516,7 +516,11 @@ async function loadResults() {
 
   const requestedQuery = state.query;
   const requestedSource = state.source;
-  const params = new URLSearchParams({ q: requestedQuery, limit: "60" });
+  const params = new URLSearchParams({
+    q: requestedQuery,
+    limit: OVERLAY_MODE ? "10" : "60",
+  });
+  if (OVERLAY_MODE) params.set("refresh", "background");
   if (requestedSource) params.set("source", requestedSource);
   const data = await getJson(`/api/sessions?${params}`);
   if (requestedQuery !== state.query || requestedSource !== state.source) return;
