@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import plistlib
 import re
 import sqlite3
 import subprocess
@@ -30,6 +31,8 @@ from syncanything.shortcut import (
     HOTKEY_LABEL,
     SERVER_LABEL,
     _bootstrap_launch_agent,
+    _plist_matches,
+    _wait_for_server,
     hotkey_launch_agent,
     hotkey_source,
     server_launch_agent,
@@ -95,6 +98,8 @@ class AdapterTests(unittest.TestCase):
         self.assertIn("NSVisualEffectMaterialHUDWindow", source)
         self.assertIn('stringByAppendingString:@"/?overlay=1"', source)
         self.assertIn('addScriptMessageHandler:self name:@"syncanything"', source)
+        self.assertIn("didFailProvisionalNavigation", source)
+        self.assertIn("scheduleOverlayReload", source)
 
     def test_shortcut_launch_agents_use_local_server_and_native_helper(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -113,6 +118,16 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(hotkey["ProgramArguments"], [str(paths.helper)])
             self.assertEqual(hotkey["LimitLoadToSessionType"], "Aqua")
 
+    def test_shortcut_reuses_only_an_unchanged_server_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "server.plist"
+            payload = {"Label": SERVER_LABEL, "RunAtLoad": True}
+            path.write_bytes(plistlib.dumps(payload))
+            self.assertTrue(_plist_matches(path, payload))
+            self.assertFalse(_plist_matches(path, {**payload, "RunAtLoad": False}))
+            path.write_text("not a plist", encoding="utf-8")
+            self.assertFalse(_plist_matches(path, payload))
+
     @patch("syncanything.shortcut.time.sleep")
     @patch("syncanything.shortcut._launchctl")
     def test_shortcut_install_retries_launchd_bootstrap(self, launchctl, sleep) -> None:
@@ -123,6 +138,17 @@ class AdapterTests(unittest.TestCase):
         _bootstrap_launch_agent("gui/501", Path("/tmp/example.plist"))
         self.assertEqual(launchctl.call_count, 2)
         sleep.assert_called_once_with(0.25)
+
+    @patch("syncanything.shortcut.time.sleep")
+    @patch("syncanything.shortcut._server_reachable", side_effect=[False, True])
+    def test_shortcut_waits_for_server_before_starting_webview(
+        self,
+        server_reachable,
+        sleep,
+    ) -> None:
+        self.assertTrue(_wait_for_server(timeout=1.0))
+        self.assertEqual(server_reachable.call_count, 2)
+        sleep.assert_called_once_with(0.1)
 
     def test_syncanything_home_uses_env_without_expanding_home(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

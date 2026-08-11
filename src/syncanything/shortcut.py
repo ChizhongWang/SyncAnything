@@ -70,9 +70,11 @@ static const CGFloat kMaximumHeight = 590.0;
 @interface SyncAnythingDelegate : NSObject <NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler>
 @property(nonatomic, strong) SyncAnythingPanel *panel;
 @property(nonatomic, strong) WKWebView *webView;
+@property(nonatomic, strong) NSURL *overlayURL;
 @property(nonatomic, strong) id keyMonitor;
 @property(nonatomic, assign) EventHotKeyRef hotkeyRef;
 @property(nonatomic, assign) BOOL hiding;
+@property(nonatomic, assign) BOOL reloadScheduled;
 - (void)togglePanel;
 @end
 
@@ -127,13 +129,36 @@ static OSStatus handle_hotkey(
     self.hiding = NO;
 }}
 
+- (void)loadOverlay {{
+    if (!self.overlayURL) return;
+    [self.webView loadRequest:[NSURLRequest requestWithURL:self.overlayURL]];
+}}
+
+- (void)scheduleOverlayReload {{
+    if (self.reloadScheduled) return;
+    self.reloadScheduled = YES;
+    __weak SyncAnythingDelegate *weakSelf = self;
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+        dispatch_get_main_queue(),
+        ^{{
+            SyncAnythingDelegate *strongSelf = weakSelf;
+            if (!strongSelf || !strongSelf.reloadScheduled) return;
+            strongSelf.reloadScheduled = NO;
+            [strongSelf loadOverlay];
+        }}
+    );
+}}
+
 - (void)showPanel {{
     [self positionPanelWithHeight:kCollapsedHeight];
     [NSApp activateIgnoringOtherApps:YES];
     [self.panel makeKeyAndOrderFront:nil];
     [self.webView evaluateJavaScript:
         @"window.syncAnythingOverlayDidShow && window.syncAnythingOverlayDidShow()"
-        completionHandler:nil];
+        completionHandler:^(id result, NSError *error) {{
+            if (error) [self scheduleOverlayReload];
+        }}];
 }}
 
 - (void)togglePanel {{
@@ -148,11 +173,28 @@ static OSStatus handle_hotkey(
 }}
 
 - (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {{
+    self.reloadScheduled = NO;
     if (self.panel.isVisible) {{
         [webView evaluateJavaScript:
             @"window.syncAnythingOverlayDidShow && window.syncAnythingOverlayDidShow()"
             completionHandler:nil];
     }}
+}}
+
+- (void)webView:(WKWebView *)webView
+      didFailProvisionalNavigation:(WKNavigation *)navigation
+      withError:(NSError *)error {{
+    [self scheduleOverlayReload];
+}}
+
+- (void)webView:(WKWebView *)webView
+      didFailNavigation:(WKNavigation *)navigation
+      withError:(NSError *)error {{
+    [self scheduleOverlayReload];
+}}
+
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)webView {{
+    [self scheduleOverlayReload];
 }}
 
 - (void)userContentController:(WKUserContentController *)controller
@@ -266,8 +308,9 @@ static OSStatus handle_hotkey(
         return;
     }}
 
-    NSString *overlayURL = [@"{escaped_url}" stringByAppendingString:@"/?overlay=1"];
-    [self.webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:overlayURL]]];
+    NSString *overlayValue = [@"{escaped_url}" stringByAppendingString:@"/?overlay=1"];
+    self.overlayURL = [NSURL URLWithString:overlayValue];
+    [self loadOverlay];
 }}
 
 - (void)applicationWillTerminate:(NSNotification *)notification {{
@@ -326,6 +369,13 @@ def _write_plist(path: Path, payload: dict[str, Any]) -> None:
     temporary.replace(path)
 
 
+def _plist_matches(path: Path, payload: dict[str, Any]) -> bool:
+    try:
+        return plistlib.loads(path.read_bytes()) == payload
+    except (OSError, plistlib.InvalidFileException, ValueError):
+        return False
+
+
 def _launch_target(label: str) -> str:
     return f"gui/{os.getuid()}/{label}"
 
@@ -367,6 +417,15 @@ def _server_reachable(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> boo
             return True
     except OSError:
         return False
+
+
+def _wait_for_server(timeout: float = 10.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _server_reachable():
+            return True
+        time.sleep(0.1)
+    return _server_reachable()
 
 
 def shortcut_status(
@@ -430,13 +489,24 @@ def install_shortcut(sync_executable: Path | None = None) -> dict[str, Any]:
     )
     paths.helper.chmod(0o755)
 
-    for label in (HOTKEY_LABEL, SERVER_LABEL):
-        _launchctl("bootout", _launch_target(label), check=False)
+    server_agent = server_launch_agent(executable, paths)
+    hotkey_agent = hotkey_launch_agent(paths)
+    reuse_server = (
+        _plist_matches(paths.server_plist, server_agent)
+        and _service_loaded(SERVER_LABEL)
+        and _server_reachable()
+    )
 
-    _write_plist(paths.server_plist, server_launch_agent(executable, paths))
-    _write_plist(paths.hotkey_plist, hotkey_launch_agent(paths))
+    _launchctl("bootout", _launch_target(HOTKEY_LABEL), check=False)
+    if not reuse_server:
+        _launchctl("bootout", _launch_target(SERVER_LABEL), check=False)
+
+    _write_plist(paths.server_plist, server_agent)
+    _write_plist(paths.hotkey_plist, hotkey_agent)
     domain = f"gui/{os.getuid()}"
-    _bootstrap_launch_agent(domain, paths.server_plist)
+    if not reuse_server:
+        _bootstrap_launch_agent(domain, paths.server_plist)
+        _wait_for_server()
     _bootstrap_launch_agent(domain, paths.hotkey_plist)
     return shortcut_status()
 
