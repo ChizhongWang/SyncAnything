@@ -1,5 +1,8 @@
 const LANGUAGE_KEY = "syncanything.language";
 const LANGUAGES = ["zh-Hans", "en"];
+const PAGE_PARAMS = new URLSearchParams(window.location.search);
+const OVERLAY_MODE = PAGE_PARAMS.get("overlay") === "1";
+document.documentElement.classList.toggle("overlay-mode", OVERLAY_MODE);
 
 const translations = {
   "zh-Hans": {
@@ -172,6 +175,50 @@ const resultCount = document.querySelector("#result-count");
 const dialog = document.querySelector("#session-dialog");
 const connectionsDialog = document.querySelector("#connections-dialog");
 let searchTimer;
+
+if (OVERLAY_MODE) {
+  document.querySelector(".search-box kbd").textContent = "⌃⌘K";
+}
+
+function sendNativeMessage(payload) {
+  const handler = window.webkit?.messageHandlers?.syncanything;
+  if (!handler) return false;
+  handler.postMessage(payload);
+  return true;
+}
+
+function setOverlayQueryState(hasQuery) {
+  if (!OVERLAY_MODE) return;
+  document.documentElement.classList.toggle("overlay-has-query", hasQuery);
+}
+
+function reportOverlayLayout() {
+  if (!OVERLAY_MODE) return;
+  requestAnimationFrame(() => {
+    const main = document.querySelector("main");
+    sendNativeMessage({
+      type: "resize",
+      height: Math.ceil(main.getBoundingClientRect().height),
+    });
+  });
+}
+
+window.syncAnythingOverlayDidShow = () => {
+  if (!OVERLAY_MODE) return;
+  clearTimeout(searchTimer);
+  searchInput.value = "";
+  state.query = "";
+  state.resultQuery = "";
+  state.results = null;
+  resultsNode.innerHTML = "";
+  setOverlayQueryState(false);
+  reportOverlayLayout();
+  requestAnimationFrame(() => searchInput.focus());
+};
+
+if (OVERLAY_MODE && window.ResizeObserver) {
+  new ResizeObserver(reportOverlayLayout).observe(document.querySelector("main"));
+}
 
 const sourceNames = { claude: "Claude Code", codex: "Codex", cursor: "Cursor", kimi: "Kimi Code", pi: "Pi", citeanything: "CiteAnything" };
 
@@ -450,11 +497,22 @@ async function loadStatus() {
 }
 
 async function loadResults() {
+  if (OVERLAY_MODE && !state.query) {
+    state.results = null;
+    state.resultQuery = "";
+    state.resultTotal = 0;
+    resultsNode.innerHTML = "";
+    setOverlayQueryState(false);
+    reportOverlayLayout();
+    return;
+  }
   resultsNode.innerHTML = "";
   const pending = document.createElement("div");
   pending.className = "empty";
   pending.textContent = t("results.searching");
   resultsNode.append(pending);
+  setOverlayQueryState(true);
+  reportOverlayLayout();
 
   const requestedQuery = state.query;
   const requestedSource = state.source;
@@ -476,6 +534,7 @@ function renderResults(results, resultQuery = "") {
     empty.className = "empty";
     empty.textContent = t("results.empty");
     resultsNode.append(empty);
+    reportOverlayLayout();
     return;
   }
   const template = document.querySelector("#result-template");
@@ -496,9 +555,22 @@ function renderResults(results, resultQuery = "") {
     });
     resultsNode.append(card);
   }
+  reportOverlayLayout();
 }
 
 async function openSession(item, query) {
+  if (OVERLAY_MODE) {
+    const target = new URL("/", window.location.origin);
+    target.searchParams.set("session", item.id);
+    if (Number.isInteger(item.match_ordinal)) {
+      target.searchParams.set("focus_ordinal", String(item.match_ordinal));
+    }
+    if (query) target.searchParams.set("focus_query", query);
+    if (!sendNativeMessage({ type: "open", url: target.href })) {
+      window.location.href = target.href;
+    }
+    return;
+  }
   const params = new URLSearchParams({ id: item.id });
   if (Number.isInteger(item.match_ordinal)) {
     params.set("focus_ordinal", String(item.match_ordinal));
@@ -567,6 +639,13 @@ function syncConnectionName() {
 searchInput.addEventListener("input", () => {
   state.query = searchInput.value.trim();
   clearTimeout(searchTimer);
+  setOverlayQueryState(Boolean(state.query));
+  reportOverlayLayout();
+  if (OVERLAY_MODE && !state.query) {
+    resultsNode.innerHTML = "";
+    state.results = null;
+    return;
+  }
   searchTimer = setTimeout(loadResults, 180);
 });
 
@@ -655,6 +734,11 @@ document.querySelector("#copy-reference").addEventListener("click", async event 
 });
 
 document.addEventListener("keydown", event => {
+  if (OVERLAY_MODE && event.key === "Escape") {
+    event.preventDefault();
+    sendNativeMessage({ type: "hide" });
+    return;
+  }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     searchInput.focus();
@@ -662,7 +746,21 @@ document.addEventListener("keydown", event => {
 });
 
 applyLanguage();
-Promise.all([loadStatus(), loadResults()]).catch(error => {
+const initialSessionId = PAGE_PARAMS.get("session");
+const initialOrdinal = Number.parseInt(PAGE_PARAMS.get("focus_ordinal") || "", 10);
+const initialQuery = PAGE_PARAMS.get("focus_query") || "";
+Promise.all([loadStatus(), OVERLAY_MODE ? Promise.resolve() : loadResults()]).then(() => {
+  if (!OVERLAY_MODE && initialSessionId) {
+    return openSession(
+      {
+        id: initialSessionId,
+        match_ordinal: Number.isInteger(initialOrdinal) ? initialOrdinal : undefined,
+      },
+      initialQuery,
+    );
+  }
+  return undefined;
+}).catch(error => {
   resultsNode.innerHTML = "";
   const failure = document.createElement("div");
   failure.className = "empty";

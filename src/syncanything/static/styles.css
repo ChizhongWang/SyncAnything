@@ -181,3 +181,116 @@ dialog::backdrop { background: rgba(20, 35, 29, .38); backdrop-filter: blur(4px)
   .card-foot .cwd { max-width: 58vw; }
   .dialog-actions { align-items: flex-start; flex-direction: column; }
 }
+
+/* The native macOS panel supplies the material and rounded outer window. The
+   embedded page only paints the search controls and result rows, leaving every
+   pixel outside the panel to the app underneath it. */
+html.overlay-mode,
+html.overlay-mode body {
+  min-height: 0;
+  height: auto;
+  overflow: hidden;
+  background: transparent;
+}
+
+html.overlay-mode .topbar,
+html.overlay-mode .eyebrow,
+html.overlay-mode .hero h1,
+html.overlay-mode .intro,
+html.overlay-mode .filters,
+html.overlay-mode .stats-section,
+html.overlay-mode dialog {
+  display: none;
+}
+
+html.overlay-mode main {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+html.overlay-mode .hero {
+  padding: 14px;
+}
+
+html.overlay-mode .search-box {
+  height: 64px;
+  border-color: rgba(121, 143, 133, .34);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .72);
+  box-shadow: none;
+}
+
+html.overlay-mode .search-box:focus-within {
+  border-color: rgba(14, 169, 119, .72);
+  box-shadow: 0 0 0 3px rgba(14, 169, 119, .10);
+}
+
+html.overlay-mode .results-section {
+  display: none;
+  margin: 0;
+  padding: 0 14px 14px;
+}
+
+html.overlay-mode.overlay-has-query .results-section {
+  display: block;
+}
+
+html.overlay-mode .section-heading {
+  display: none;
+}
+
+html.overlay-mode .results {
+  max-height: 470px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  gap: 7px;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+html.overlay-mode .result-card {
+  padding: 12px 14px;
+  border-color: rgba(190, 207, 199, .62);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .58);
+  box-shadow: none;
+}
+
+html.overlay-mode .result-card:hover,
+html.overlay-mode .result-card:focus {
+  transform: none;
+  border-color: rgba(14, 169, 119, .58);
+  background: rgba(245, 255, 250, .82);
+  box-shadow: none;
+}
+
+html.overlay-mode .card-meta {
+  font-size: 10px;
+}
+
+html.overlay-mode .source-badge {
+  padding: 3px 6px;
+  font-size: 9px;
+}
+
+html.overlay-mode .result-card h3 {
+  margin: 7px 0 4px;
+  font-size: 15px;
+}
+
+html.overlay-mode .snippet {
+  -webkit-line-clamp: 1;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+html.overlay-mode .card-foot {
+  display: none;
+}
+
+html.overlay-mode .empty {
+  padding: 34px 18px;
+  border-color: rgba(190, 207, 199, .62);
+  background: rgba(255, 255, 255, .34);
+}

@@ -70,8 +70,10 @@ syncanything shortcut install
 ```
 
 SyncAnything will then start its local-only search service when you sign in to
-the Mac. Press **Control + Command + K** from any app to open the search
-page with its search field focused. Inspect or remove the integration with:
+the Mac. Press **Control + Command + K** from any app to open a Spotlight-style
+native search panel with its search field focused. Results expand below the
+field; choosing one opens the complete conversation in the regular local web
+interface. Inspect or remove the integration with:
 
 ```bash
 syncanything shortcut status
@@ -79,8 +81,10 @@ syncanything shortcut uninstall
 ```
 
 The installer creates two per-user LaunchAgents: one for the local server and a
-small native hotkey listener. It does not require Accessibility permission and
-never exposes the server beyond `127.0.0.1`.
+small native AppKit/WebKit panel. The panel is borderless, floats above the
+current app, disappears on Escape or focus loss, and reuses the same local web
+assets without opening a browser tab. It does not require Accessibility
+permission and never exposes the server beyond `127.0.0.1`.
 
 The interface opens in Simplified Chinese or English depending on your browser, and
 the toolbar button switches between them; the choice is remembered in that browser.

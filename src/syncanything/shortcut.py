@@ -52,52 +52,239 @@ def hotkey_source(url: str = DEFAULT_URL) -> str:
     escaped_url = url.replace("\\", "\\\\").replace('"', '\\"')
     return f"""#import <Cocoa/Cocoa.h>
 #import <Carbon/Carbon.h>
+#import <WebKit/WebKit.h>
+
+static const CGFloat kPanelWidth = 760.0;
+static const CGFloat kCollapsedHeight = 92.0;
+static const CGFloat kMaximumHeight = 590.0;
+
+@interface SyncAnythingPanel : NSPanel
+@end
+
+@implementation SyncAnythingPanel
+- (BOOL)canBecomeKeyWindow {{ return YES; }}
+- (BOOL)canBecomeMainWindow {{ return NO; }}
+@end
+
+@interface SyncAnythingDelegate : NSObject <NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler>
+@property(nonatomic, strong) SyncAnythingPanel *panel;
+@property(nonatomic, strong) WKWebView *webView;
+@property(nonatomic, strong) id keyMonitor;
+@property(nonatomic, assign) EventHotKeyRef hotkeyRef;
+@property(nonatomic, assign) BOOL hiding;
+- (void)togglePanel;
+@end
 
 static OSStatus handle_hotkey(
     EventHandlerCallRef next_handler,
     EventRef event,
     void *user_data
 ) {{
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"{escaped_url}"]];
+    SyncAnythingDelegate *delegate = (__bridge SyncAnythingDelegate *)user_data;
+    [delegate togglePanel];
     return noErr;
 }}
 
+@implementation SyncAnythingDelegate
+
+- (NSScreen *)activeScreen {{
+    NSPoint cursor = [NSEvent mouseLocation];
+    for (NSScreen *screen in [NSScreen screens]) {{
+        if (NSPointInRect(cursor, screen.frame)) return screen;
+    }}
+    return [NSScreen mainScreen] ?: [[NSScreen screens] firstObject];
+}}
+
+- (void)positionPanelWithHeight:(CGFloat)height {{
+    NSScreen *screen = [self activeScreen];
+    NSRect visible = screen.visibleFrame;
+    CGFloat width = MIN(kPanelWidth, visible.size.width - 40.0);
+    CGFloat top = NSMaxY(visible) - MAX(72.0, visible.size.height * 0.18);
+    NSRect frame = NSMakeRect(
+        NSMidX(visible) - width / 2.0,
+        top - height,
+        width,
+        height
+    );
+    [self.panel setFrame:frame display:NO];
+}}
+
+- (void)resizePanelToHeight:(CGFloat)requestedHeight {{
+    CGFloat height = MIN(MAX(requestedHeight, kCollapsedHeight), kMaximumHeight);
+    NSRect frame = self.panel.frame;
+    CGFloat top = NSMaxY(frame);
+    frame.origin.y = top - height;
+    frame.size.height = height;
+    [self.panel setFrame:frame display:YES animate:self.panel.isVisible];
+}}
+
+- (void)hidePanel {{
+    if (!self.panel.isVisible || self.hiding) return;
+    self.hiding = YES;
+    [self.panel orderOut:nil];
+    [NSApp hide:nil];
+    self.hiding = NO;
+}}
+
+- (void)showPanel {{
+    [self positionPanelWithHeight:kCollapsedHeight];
+    [NSApp activateIgnoringOtherApps:YES];
+    [self.panel makeKeyAndOrderFront:nil];
+    [self.webView evaluateJavaScript:
+        @"window.syncAnythingOverlayDidShow && window.syncAnythingOverlayDidShow()"
+        completionHandler:nil];
+}}
+
+- (void)togglePanel {{
+    dispatch_async(dispatch_get_main_queue(), ^{{
+        if (self.panel.isVisible) [self hidePanel];
+        else [self showPanel];
+    }});
+}}
+
+- (void)panelDidResignKey:(NSNotification *)notification {{
+    [self hidePanel];
+}}
+
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {{
+    if (self.panel.isVisible) {{
+        [webView evaluateJavaScript:
+            @"window.syncAnythingOverlayDidShow && window.syncAnythingOverlayDidShow()"
+            completionHandler:nil];
+    }}
+}}
+
+- (void)userContentController:(WKUserContentController *)controller
+      didReceiveScriptMessage:(WKScriptMessage *)message {{
+    if (![message.body isKindOfClass:[NSDictionary class]]) return;
+    NSDictionary *payload = (NSDictionary *)message.body;
+    NSString *type = payload[@"type"];
+    if ([type isEqualToString:@"resize"]) {{
+        NSNumber *height = payload[@"height"];
+        if ([height isKindOfClass:[NSNumber class]]) {{
+            [self resizePanelToHeight:height.doubleValue];
+        }}
+        return;
+    }}
+    if ([type isEqualToString:@"hide"]) {{
+        [self hidePanel];
+        return;
+    }}
+    if ([type isEqualToString:@"open"]) {{
+        NSString *value = payload[@"url"];
+        NSURL *target = [NSURL URLWithString:value ?: @""];
+        BOOL safeHost = [target.host isEqualToString:@"127.0.0.1"];
+        BOOL safePort = target.port == nil || target.port.integerValue == {DEFAULT_PORT};
+        if ([target.scheme isEqualToString:@"http"] && safeHost && safePort) {{
+            [[NSWorkspace sharedWorkspace] openURL:target];
+            [self hidePanel];
+        }}
+    }}
+}}
+
+- (void)applicationDidFinishLaunching:(NSNotification *)notification {{
+    WKWebViewConfiguration *configuration = [[WKWebViewConfiguration alloc] init];
+    [configuration.userContentController addScriptMessageHandler:self name:@"syncanything"];
+    self.webView = [[WKWebView alloc] initWithFrame:NSZeroRect configuration:configuration];
+    self.webView.navigationDelegate = self;
+    self.webView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    self.webView.wantsLayer = YES;
+    self.webView.layer.backgroundColor = NSColor.clearColor.CGColor;
+    [self.webView setValue:@NO forKey:@"drawsBackground"];
+
+    NSVisualEffectView *material = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+    material.material = NSVisualEffectMaterialHUDWindow;
+    material.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+    material.state = NSVisualEffectStateActive;
+    material.wantsLayer = YES;
+    material.layer.cornerRadius = 20.0;
+    material.layer.masksToBounds = YES;
+    [material addSubview:self.webView];
+
+    self.panel = [[SyncAnythingPanel alloc]
+        initWithContentRect:NSMakeRect(0, 0, kPanelWidth, kCollapsedHeight)
+        styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskFullSizeContentView
+        backing:NSBackingStoreBuffered
+        defer:NO];
+    self.panel.contentView = material;
+    self.panel.backgroundColor = NSColor.clearColor;
+    self.panel.opaque = NO;
+    self.panel.hasShadow = YES;
+    self.panel.level = NSFloatingWindowLevel;
+    self.panel.releasedWhenClosed = NO;
+    self.panel.movableByWindowBackground = YES;
+    self.panel.collectionBehavior =
+        NSWindowCollectionBehaviorCanJoinAllSpaces |
+        NSWindowCollectionBehaviorFullScreenAuxiliary |
+        NSWindowCollectionBehaviorTransient;
+
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+        selector:@selector(panelDidResignKey:)
+        name:NSWindowDidResignKeyNotification
+        object:self.panel];
+
+    __weak SyncAnythingDelegate *weakSelf = self;
+    self.keyMonitor = [NSEvent
+        addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+        handler:^NSEvent *(NSEvent *event) {{
+            if (event.keyCode == kVK_Escape) {{
+                [weakSelf hidePanel];
+                return nil;
+            }}
+            return event;
+        }}];
+
+    EventTypeSpec eventType = {{kEventClassKeyboard, kEventHotKeyPressed}};
+    EventHandlerUPP handler = NewEventHandlerUPP(handle_hotkey);
+    OSStatus status = InstallApplicationEventHandler(
+        handler,
+        1,
+        &eventType,
+        (__bridge void *)self,
+        NULL
+    );
+    if (status != noErr) {{
+        fprintf(stderr, "Could not install SyncAnything hotkey handler: %d\\n", status);
+        [NSApp terminate:nil];
+        return;
+    }}
+
+    EventHotKeyID hotkeyID = {{FOUR_CHAR_CODE('SYNC'), 1}};
+    status = RegisterEventHotKey(
+        kVK_ANSI_K,
+        cmdKey | controlKey,
+        hotkeyID,
+        GetApplicationEventTarget(),
+        0,
+        &_hotkeyRef
+    );
+    if (status != noErr) {{
+        fprintf(stderr, "Could not register Control + Command + K: %d\\n", status);
+        [NSApp terminate:nil];
+        return;
+    }}
+
+    NSString *overlayURL = [@"{escaped_url}" stringByAppendingString:@"/?overlay=1"];
+    [self.webView loadRequest:[NSURLRequest requestWithURL:[NSURL URLWithString:overlayURL]]];
+}}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {{
+    if (self.keyMonitor) [NSEvent removeMonitor:self.keyMonitor];
+    if (self.hotkeyRef) UnregisterEventHotKey(self.hotkeyRef);
+    [self.webView.configuration.userContentController
+        removeScriptMessageHandlerForName:@"syncanything"];
+}}
+
+@end
+
 int main(int argc, const char *argv[]) {{
     @autoreleasepool {{
-        [NSApplication sharedApplication];
+        NSApplication *application = [NSApplication sharedApplication];
+        SyncAnythingDelegate *delegate = [[SyncAnythingDelegate alloc] init];
+        application.delegate = delegate;
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-        [NSApp finishLaunching];
-
-        EventTypeSpec event_type = {{kEventClassKeyboard, kEventHotKeyPressed}};
-        EventHandlerUPP handler = NewEventHandlerUPP(handle_hotkey);
-        OSStatus status = InstallApplicationEventHandler(
-            handler,
-            1,
-            &event_type,
-            NULL,
-            NULL
-        );
-        if (status != noErr) {{
-            fprintf(stderr, "Could not install SyncAnything hotkey handler: %d\\n", status);
-            return 1;
-        }}
-
-        EventHotKeyID hotkey_id = {{FOUR_CHAR_CODE('SYNC'), 1}};
-        EventHotKeyRef hotkey = NULL;
-        status = RegisterEventHotKey(
-            kVK_ANSI_K,
-            cmdKey | controlKey,
-            hotkey_id,
-            GetApplicationEventTarget(),
-            0,
-            &hotkey
-        );
-        if (status != noErr) {{
-            fprintf(stderr, "Could not register Control + Command + K: %d\\n", status);
-            return 2;
-        }}
-
-        [NSApp run];
+        [application run];
     }}
     return 0;
 }}
@@ -213,6 +400,8 @@ def install_shortcut(sync_executable: Path | None = None) -> dict[str, Any]:
             "Carbon",
             "-framework",
             "Cocoa",
+            "-framework",
+            "WebKit",
             "-fobjc-arc",
             f"-fmodules-cache-path={module_cache}",
         ],

@@ -62,12 +62,25 @@ class AdapterTests(unittest.TestCase):
         for name in ("app.js", "index.html", "logo.svg", "styles.css"):
             self.assertTrue(static.joinpath(name).is_file(), name)
 
+    def test_web_assets_include_native_overlay_mode(self) -> None:
+        static = files("syncanything.static")
+        script = static.joinpath("app.js").read_text(encoding="utf-8")
+        styles = static.joinpath("styles.css").read_text(encoding="utf-8")
+        self.assertIn('PAGE_PARAMS.get("overlay") === "1"', script)
+        self.assertIn("syncAnythingOverlayDidShow", script)
+        self.assertIn('type: "resize"', script)
+        self.assertIn("html.overlay-mode.overlay-has-query", styles)
+
     def test_macos_hotkey_registers_the_documented_shortcut(self) -> None:
         source = hotkey_source("http://127.0.0.1:7331")
         self.assertIn("RegisterEventHotKey", source)
         self.assertIn("kVK_ANSI_K", source)
         self.assertIn("cmdKey | controlKey", source)
-        self.assertIn('openURL:[NSURL URLWithString:@"http://127.0.0.1:7331"]', source)
+        self.assertIn("SyncAnythingPanel : NSPanel", source)
+        self.assertIn("WKWebView", source)
+        self.assertIn("NSVisualEffectMaterialHUDWindow", source)
+        self.assertIn('stringByAppendingString:@"/?overlay=1"', source)
+        self.assertIn('addScriptMessageHandler:self name:@"syncanything"', source)
 
     def test_shortcut_launch_agents_use_local_server_and_native_helper(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
