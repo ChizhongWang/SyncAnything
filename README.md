@@ -342,6 +342,7 @@ rather than re-downloaded.
 | <img src="docs/logos/kimi-color.svg" width="20" alt="Kimi Code"> | Kimi Code (legacy) | `~/.kimi/sessions/*/*/context.jsonl` | Verified locally |
 | <img src="docs/logos/kimi-color.svg" width="20" alt="Kimi Code"> | Kimi Code (current) | `~/.kimi-code/sessions/*/*/agents/main/wire.jsonl` | Adapter included |
 | <img src="docs/logos/pi.svg" width="20" alt="Pi"> | Pi | `~/.pi/agent/sessions/**/*.jsonl` | Official format implemented |
+| | agy (Antigravity CLI) | `~/.gemini/antigravity-cli/brain/*/.system_generated/logs/transcript.jsonl` | Verified locally |
 | <img src="docs/logos/citeanything.png" width="20" alt="CiteAnything"> | CiteAnything | Authenticated Conversation API | Product-level adapter included |
 | <img src="docs/logos/opencode.svg" width="20" alt="OpenCode"> | OpenCode | SQLite session store | Next adapter |
 | <img src="docs/logos/grok.svg" width="20" alt="Grok Build"> | Grok Build | Pending stable local export contract | Next adapter |

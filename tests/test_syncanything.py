@@ -38,6 +38,7 @@ from syncanything.shortcut import (
     server_launch_agent,
     shortcut_paths,
 )
+from syncanything.sources.agy import AgyAdapter
 from syncanything.sources.citeanything import CiteAnythingAdapter
 from syncanything.sources.claude import ClaudeAdapter
 from syncanything.sources.codex import CodexAdapter
@@ -396,6 +397,67 @@ class AdapterTests(unittest.TestCase):
             assert pi is not None
             self.assertEqual(pi.id, "pi:p1")
             self.assertEqual(len(pi.messages), 2)
+
+    def test_agy_keeps_visible_turns_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            conversation = "agy-1"
+            path = (
+                root
+                / "brain"
+                / conversation
+                / ".system_generated"
+                / "logs"
+                / "transcript.jsonl"
+            )
+            write_jsonl(
+                path,
+                [
+                    {
+                        "step_index": 0,
+                        "source": "USER_EXPLICIT",
+                        "type": "USER_INPUT",
+                        "created_at": "2026-11-16T03:32:01Z",
+                        "content": "<USER_REQUEST>\n接手这个回测任务\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nhidden\n</ADDITIONAL_METADATA>",
+                    },
+                    {
+                        "step_index": 1,
+                        "source": "MODEL",
+                        "type": "PLANNER_RESPONSE",
+                        "created_at": "2026-11-16T03:32:05Z",
+                        "content": "我先读会话。",
+                        "thinking": "private",
+                        "tool_calls": [{"name": "run_command", "args": {}}],
+                    },
+                    {
+                        "step_index": 2,
+                        "source": "MODEL",
+                        "type": "GENERIC",
+                        "created_at": "2026-11-16T03:32:07Z",
+                        "content": "Command output:\nsecret tool output",
+                    },
+                    {
+                        "step_index": 3,
+                        "source": "SYSTEM",
+                        "type": "SYSTEM_MESSAGE",
+                        "created_at": "2026-11-16T03:32:08Z",
+                        "content": "The following is a <SYSTEM_MESSAGE> not from the user.",
+                    },
+                ],
+            )
+            write_jsonl(
+                root / "history.jsonl",
+                [{"conversationId": conversation, "workspace": "/work/a62", "display": "接手这个回测任务"}],
+            )
+            chunk = path.parent / "chunks" / "transcript" / "00000000.jsonl"
+            write_jsonl(chunk, [{"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": "<USER_REQUEST>不应被索引</USER_REQUEST>"}])
+
+            session = AgyAdapter(root / "brain").parse(path)
+            assert session is not None
+            self.assertEqual(session.id, "agy:agy-1")
+            self.assertEqual(session.cwd, "/work/a62")
+            self.assertEqual([message.text for message in session.messages], ["接手这个回测任务", "我先读会话。"])
+            self.assertEqual(list(AgyAdapter(root / "brain").discover()), [path])
 
     def test_cursor_indexes_app_and_cli_without_splitting_source(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

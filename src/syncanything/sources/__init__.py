@@ -1,3 +1,4 @@
+from syncanything.sources.agy import AgyAdapter
 from syncanything.sources.base import SourceAdapter
 from syncanything.sources.citeanything import CiteAnythingAdapter
 from syncanything.sources.claude import ClaudeAdapter
@@ -6,9 +7,19 @@ from syncanything.sources.cursor import CursorAdapter
 from syncanything.sources.kimi import KimiAdapter
 from syncanything.sources.pi import PiAdapter
 
+SOURCE_NAMES = ["claude", "codex", "cursor", "kimi", "pi", "agy", "citeanything"]
+
 
 def default_adapters() -> list[SourceAdapter]:
-    return [ClaudeAdapter(), CodexAdapter(), CursorAdapter(), KimiAdapter(), PiAdapter(), CiteAnythingAdapter()]
+    return [
+        ClaudeAdapter(),
+        CodexAdapter(),
+        CursorAdapter(),
+        KimiAdapter(),
+        PiAdapter(),
+        AgyAdapter(),
+        CiteAnythingAdapter(),
+    ]
 
 
 def local_adapters() -> list[SourceAdapter]:
@@ -17,9 +28,11 @@ def local_adapters() -> list[SourceAdapter]:
 
 
 __all__ = [
+    "SOURCE_NAMES",
     "SourceAdapter",
     "local_adapters",
     "CiteAnythingAdapter",
+    "AgyAdapter",
     "ClaudeAdapter",
     "CodexAdapter",
     "CursorAdapter",
