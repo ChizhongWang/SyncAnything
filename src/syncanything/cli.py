@@ -13,7 +13,7 @@ from syncanything.index import ConversationIndex, default_db_path
 from syncanything.mcp import run_mcp
 from syncanything.service import SyncAnythingService
 from syncanything.shortcut import install_shortcut, shortcut_status, uninstall_shortcut
-from syncanything.sources import local_adapters
+from syncanything.sources import SOURCE_NAMES, local_adapters
 from syncanything.web import serve
 from syncanything.works import (
     WorksConflictError,
@@ -58,14 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser = subparsers.add_parser("search", help="Search indexed sessions.")
     search_parser.add_argument("query")
     search_parser.add_argument(
-        "--source", choices=["claude", "codex", "cursor", "kimi", "pi", "citeanything"]
+        "--source", choices=SOURCE_NAMES
     )
     search_parser.add_argument("--limit", type=int, default=20)
     search_parser.add_argument("--json", action="store_true")
 
     list_parser = subparsers.add_parser("list", help="List recent sessions.")
     list_parser.add_argument(
-        "--source", choices=["claude", "codex", "cursor", "kimi", "pi", "citeanything"]
+        "--source", choices=SOURCE_NAMES
     )
     list_parser.add_argument("--limit", type=int, default=30)
     list_parser.add_argument("--json", action="store_true")
